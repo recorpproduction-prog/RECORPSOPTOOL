@@ -188,20 +188,20 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Preload logo immediately
     preloadLogo();
     
-    // Load SOPs from GitHub on startup (shared database) - CRITICAL for cross-device access
+    // Load SOPs from GitHub on startup - NON-BLOCKING (don't break app if GitHub fails)
     if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
-        try {
-            console.log('🔄 Loading SOPs from GitHub repository...');
-            const sops = await loadAllSopsFromGitHubRepo();
+        // Load asynchronously without blocking app initialization
+        loadAllSopsFromGitHubRepo().then(sops => {
             if (sops && Object.keys(sops).length > 0) {
                 console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from GitHub repository`);
             } else {
                 console.log('📝 No SOPs in GitHub repository yet');
             }
-        } catch (error) {
-            console.error('❌ Error loading SOPs from GitHub:', error);
-            showNotification('Error loading SOPs from GitHub. Please check your repository exists.', 'error');
-        }
+        }).catch(error => {
+            console.warn('⚠️ GitHub load failed (app will still work):', error.message);
+            // Don't show error notification - just log it
+            // App will work without GitHub
+        });
     }
     
     // Load last draft SOP from storage on page load (only on initial page load, not when switching tabs)
@@ -1272,7 +1272,14 @@ async function saveSopToStorage() {
                 }
             } catch (error) {
                 console.error('❌ Error saving to GitHub:', error);
-                showNotification('Error saving to GitHub: ' + error.message + '. Please check your repository exists.', 'error');
+                // Show detailed error message
+                let errorMsg = error.message || 'Unknown error';
+                if (errorMsg.includes('401') || errorMsg.includes('Bad credentials')) {
+                    errorMsg = 'GitHub authentication failed. Please check your token in index.html has the correct permissions (repo scope).';
+                } else if (errorMsg.includes('404')) {
+                    errorMsg = `Repository not found. Please create ${githubRepoStorage?.owner || 'your'}/${githubRepoStorage?.repo || 'recorp-sops-data'} on GitHub.`;
+                }
+                showNotification('Error saving to GitHub: ' + errorMsg, 'error');
                 throw error; // Don't continue if GitHub save fails
             }
         } else {

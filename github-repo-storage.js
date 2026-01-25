@@ -76,6 +76,16 @@ async function githubApiRequest(endpoint, options = {}) {
         } catch {
             error = { message: errorText || response.statusText };
         }
+        
+        // Provide helpful error messages
+        if (response.status === 401) {
+            throw new Error(`Bad credentials (401). Your GitHub token may be invalid, expired, or missing 'repo' scope. Please check your token in index.html.`);
+        } else if (response.status === 403) {
+            throw new Error(`Forbidden (403). Your token may not have permission to access this repository.`);
+        } else if (response.status === 404) {
+            throw new Error(`Not found (404). Repository ${githubRepoStorage.owner}/${githubRepoStorage.repo} may not exist.`);
+        }
+        
         throw new Error(`GitHub API error: ${error.message || response.statusText} (${response.status})`);
     }
     
@@ -145,6 +155,9 @@ async function saveSopToGitHubRepo(sop) {
     } catch (error) {
         if (error.message.includes('404')) {
             throw new Error(`Repository ${githubRepoStorage.owner}/${githubRepoStorage.repo} does not exist. Please create it on GitHub.`);
+        }
+        if (error.message.includes('401') || error.message.includes('Bad credentials')) {
+            throw new Error('GitHub authentication failed. Please check your token is valid and has the correct permissions (repo scope).');
         }
         throw error;
     }
@@ -221,8 +234,9 @@ async function loadAllSopsFromGitHubRepo() {
         console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from GitHub repository`);
         return sops;
     } catch (error) {
-        console.warn('⚠️ Could not load from GitHub (using localStorage):', error.message);
-        return null; // Return null to fall back to localStorage
+        // Don't throw - just return empty object so app continues working
+        console.warn('⚠️ Could not load from GitHub:', error.message);
+        return {}; // Return empty object, not null
     }
 }
 
@@ -271,19 +285,14 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Try to load from GitHub (non-blocking, silent failure)
             loadAllSopsFromGitHubRepo().then(sops => {
-                if (sops !== null) {
-                    if (Object.keys(sops).length > 0) {
-                        console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from GitHub - syncing to localStorage`);
-                        // Merge with existing localStorage (GitHub takes priority)
-                        const existing = JSON.parse(localStorage.getItem('savedSops') || '{}');
-                        const merged = { ...existing, ...sops };
-                        localStorage.setItem('savedSops', JSON.stringify(merged));
-                    }
+                if (sops && Object.keys(sops).length > 0) {
+                    console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from GitHub repository`);
                 } else {
-                    console.log('📝 Using localStorage (GitHub repo not created yet)');
+                    console.log('📝 No SOPs in GitHub repository yet');
                 }
-            }).catch(() => {
-                // Silent failure - localStorage is primary
+            }).catch(error => {
+                // Silent failure - don't break the app
+                console.warn('⚠️ GitHub load failed (app will still work):', error.message);
             });
         } else {
             console.log('📝 Using localStorage only (GitHub not configured)');
