@@ -181,6 +181,18 @@ async function preloadLogo() {
     }
 }
 
+// Make critical functions available immediately (before DOMContentLoaded)
+// These are stubs that will be replaced with full implementations below
+window.switchTab = function(tabName) {
+    console.warn('switchTab not loaded yet');
+};
+window.submitSopRequest = function(event) {
+    if (event && typeof event.preventDefault === 'function') {
+        event.preventDefault();
+    }
+    return false;
+};
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', async function() {
     initializeEventListeners();
@@ -2315,8 +2327,9 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
     });
 }
 
-// Tab Management
-function switchTab(tabName) {
+// Tab Management - Make available globally immediately
+// Tab Management - Store implementation
+window._switchTabImpl = function switchTab(tabName) {
     // Update tab buttons
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.remove('active');
@@ -2773,7 +2786,8 @@ window.loadFromFile = loadFromFile;
 // SOP Requests Functions
 let sopRequests = [];
 
-function submitSopRequest(event) {
+// Store implementation
+window._submitSopRequestImpl = function submitSopRequest(event) {
     // Prevent default form submission if event is provided
     if (event && typeof event.preventDefault === 'function') {
         event.preventDefault();
@@ -3056,9 +3070,10 @@ function deleteRequest(requestId) {
     });
 }
 
-window.switchTab = switchTab;
+// Update the global functions to point to implementations
+window.switchTab = window._switchTabImpl;
+window.submitSopRequest = window._submitSopRequestImpl;
 window.refreshRegister = refreshRegister;
-window.submitSopRequest = submitSopRequest;
 window.clearRequestForm = clearRequestForm;
 window.filterRequests = filterRequests;
 window.refreshRequestsList = refreshRequestsList;
@@ -4411,9 +4426,9 @@ function saveUser() {
     const users = getUsers();
     
     // Check if email already exists (unless editing the same user)
-    const existingUserIndex = users.findIndex((u, idx) => 
-        u.email.toLowerCase() === email.toLowerCase() && idx !== currentEditingUserIndex
-    );
+    const existingUserIndex = users.findIndex((u, idx) => {
+        return u.email.toLowerCase() === email.toLowerCase() && idx !== currentEditingUserIndex;
+    });
     
     if (existingUserIndex !== -1) {
         showNotification('A user with this email already exists.', 'warning');
@@ -4497,10 +4512,6 @@ function populateAllReviewerDropdowns() {
     // Populate all inline reviewer dropdowns in the review list
     // Note: This will be populated when review list is refreshed from GitHub
     // For now, just populate the main review view dropdown
-        const sop = savedSops[key];
-        const dropdownId = `reviewerName-${key}`;
-        populateReviewerDropdown(dropdownId, sop.meta.reviewer || '');
-    });
 }
 
 async function sendPdfEmailToUser(pdfBlob, sop, user) {

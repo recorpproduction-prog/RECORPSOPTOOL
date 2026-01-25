@@ -24,12 +24,9 @@ function initGitHubRepoStorage() {
     }
     
     // Replace placeholder values
-    if (config.owner === 'YOUR_GITHUB_USERNAME' || config.repo === 'recorp-sops-data' && !config.repo.includes('YOUR')) {
-        // Check if owner needs to be set
-        if (config.owner === 'YOUR_GITHUB_USERNAME') {
-            console.error('⚠️ Please set your GitHub username in index.html (githubRepoConfig.owner)');
-            return false;
-        }
+    if (config.owner === 'YOUR_GITHUB_USERNAME') {
+        console.error('⚠️ Please set your GitHub username in index.html (githubRepoConfig.owner)');
+        return false;
     }
     
     githubRepoStorage.token = config.token;
