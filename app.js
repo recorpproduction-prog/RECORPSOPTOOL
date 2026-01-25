@@ -191,18 +191,16 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Load SOPs from GitHub on startup (shared database) - CRITICAL for cross-device access
     if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
         try {
-            console.log('🔄 Loading SOPs from shared GitHub repository...');
+            console.log('🔄 Loading SOPs from GitHub repository...');
             const sops = await loadAllSopsFromGitHubRepo();
             if (sops && Object.keys(sops).length > 0) {
-                console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from shared GitHub repository`);
-                // Sync to localStorage as backup
-                localStorage.setItem('savedSops', JSON.stringify(sops));
+                console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from GitHub repository`);
             } else {
-                console.log('No SOPs found in GitHub repository yet');
+                console.log('📝 No SOPs in GitHub repository yet');
             }
         } catch (error) {
-            console.error('❌ Error loading SOPs from GitHub on startup:', error);
-            console.log('Will use localStorage as fallback');
+            console.error('❌ Error loading SOPs from GitHub:', error);
+            showNotification('Error loading SOPs from GitHub. Please check your repository exists.', 'error');
         }
     }
     
@@ -318,7 +316,7 @@ async function createNewSop() {
 }
 
 // Auto-generate SOP Reference Number
-function autoGenerateSopId(forceGenerate = false) {
+async function autoGenerateSopId(forceGenerate = false) {
     const department = document.getElementById('department').value;
     const sopIdField = document.getElementById('sopId');
     
@@ -347,8 +345,8 @@ function autoGenerateSopId(forceGenerate = false) {
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const dateStr = String(now.getDate()).padStart(2, '0');
     
-    // Get sequence number for this department and month
-    const sequence = getNextSequenceNumber(deptCode, year, month);
+    // Get sequence number for this department and month (from GitHub)
+    const sequence = await getNextSequenceNumber(deptCode, year, month);
     
     // Format: DEPT-YYYY-MM-DD-NNN (e.g., PROD-2024-01-15-001)
     const sopId = `${deptCode}-${year}-${month}-${dateStr}-${String(sequence).padStart(3, '0')}`;
@@ -358,9 +356,20 @@ function autoGenerateSopId(forceGenerate = false) {
 }
 
 // Get next sequence number for a department/month combination
-function getNextSequenceNumber(deptCode, year, month) {
+async function getNextSequenceNumber(deptCode, year, month) {
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('Error loading from GitHub for sequence:', error);
+                savedSops = {};
+            }
+        }
+        
         const prefix = `${deptCode}-${year}-${month}`;
         
         let maxSequence = 0;
@@ -1248,33 +1257,28 @@ async function saveSopToStorage() {
         const key = currentSop.meta.sopId || `sop-${Date.now()}`;
         currentSop.meta.sopId = key; // Ensure SOP ID is set
         
-        // Try GitHub Repository first (shared database)
+        // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
         if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
             try {
                 await saveSopToGitHubRepo(currentSop);
-                console.log('✅ SOP saved to shared GitHub repository');
-                // Refresh lists
+                console.log('✅ SOP saved to GitHub repository');
+                
+                // Refresh lists after GitHub save
                 if (document.getElementById('sopRegister').classList.contains('active')) {
-                    refreshRegister();
+                    await refreshRegister();
                 }
                 if (document.getElementById('sopReview').classList.contains('active')) {
-                    refreshReviewList();
+                    await refreshReviewList();
                 }
-                return; // Success - exit early
             } catch (error) {
-                console.error('GitHub save failed, falling back to localStorage:', error);
-                // Continue to localStorage fallback
+                console.error('❌ Error saving to GitHub:', error);
+                showNotification('Error saving to GitHub: ' + error.message + '. Please check your repository exists.', 'error');
+                throw error; // Don't continue if GitHub save fails
             }
+        } else {
+            showNotification('GitHub storage not configured. Please check your repository settings.', 'error');
+            throw new Error('GitHub storage not available');
         }
-        
-        // Fallback to localStorage (if GitHub not available)
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
-        savedSops[key] = {
-            ...currentSop,
-            savedAt: new Date().toISOString()
-        };
-        localStorage.setItem('savedSops', JSON.stringify(savedSops));
-        localStorage.setItem('currentSop', JSON.stringify(currentSop));
         
         // Also save to GitHub if enabled (OPTIONAL - silent failure)
         if (typeof githubStorage !== 'undefined' && githubStorage.isEnabled) {
@@ -1287,15 +1291,7 @@ async function saveSopToStorage() {
             }
         }
         
-        // Refresh register if it's visible
-        if (document.getElementById('sopRegister').classList.contains('active')) {
-            refreshRegister();
-        }
-        
-        // Refresh review list if it's visible
-        if (document.getElementById('sopReview').classList.contains('active')) {
-            refreshReviewList();
-        }
+        // Lists already refreshed above after GitHub save
     } catch (e) {
         if (e.name === 'QuotaExceededError') {
             // Storage is full - show user-friendly error with cleanup options
@@ -1320,14 +1316,32 @@ function loadSopFromStorage() {
     }
 }
 
-function showLoadSection() {
+async function showLoadSection() {
     const section = document.getElementById('loadSopSection');
     const list = document.getElementById('savedSopsList');
     
     if (!section || !list) return;
     
+    list.innerHTML = '<p>Loading SOPs from GitHub...</p>';
+    section.classList.remove('hidden');
+    
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                list.innerHTML = '<p>Error loading SOPs from GitHub: ' + error.message + '</p>';
+                return;
+            }
+        } else {
+            list.innerHTML = '<p>GitHub storage not available</p>';
+            return;
+        }
+        
         list.innerHTML = '';
         
         const sopKeys = Object.keys(savedSops);
@@ -1340,7 +1354,7 @@ function showLoadSection() {
                 item.className = 'saved-sop-item';
                 item.innerHTML = `
                     <h4>${escapeHtml(sop.meta.title || 'Untitled SOP')}</h4>
-                    <p>SOP ID: ${escapeHtml(sop.meta.sopId || 'N/A')} | Saved: ${new Date(sop.savedAt).toLocaleString()}</p>
+                    <p>SOP ID: ${escapeHtml(sop.meta.sopId || 'N/A')} | Saved: ${sop.savedAt ? new Date(sop.savedAt).toLocaleString() : 'N/A'}</p>
                 `;
                 item.onclick = () => {
                     loadSop(sop);
@@ -1353,8 +1367,6 @@ function showLoadSection() {
         list.innerHTML = '<p>Error loading saved SOPs.</p>';
         console.error('Error:', e);
     }
-    
-    section.classList.remove('hidden');
 }
 
 function closeLoadSection() {
@@ -1413,13 +1425,27 @@ function closeExportsSection() {
     if (section) section.classList.add('hidden');
 }
 
-function downloadExport(index) {
+async function downloadExport(index) {
     try {
         const exports = JSON.parse(localStorage.getItem('sopExports') || '[]');
         if (index >= 0 && index < exports.length) {
             const exportItem = exports[index];
-            // Load full data from savedSops since we only store metadata in exports
-            const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+            // Load full data from GitHub since we only store metadata in exports
+            let savedSops = {};
+            if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+                try {
+                    const loaded = await loadAllSopsFromGitHubRepo();
+                    savedSops = loaded || {};
+                } catch (error) {
+                    console.error('❌ Error loading from GitHub:', error);
+                    showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
+                    return;
+                }
+            } else {
+                showNotification('GitHub storage not available', 'error');
+                return;
+            }
+            
             const sop = savedSops[exportItem.sopId];
             if (sop) {
                 const jsonStr = JSON.stringify(sop, null, 2);
@@ -1440,13 +1466,27 @@ function downloadExport(index) {
     }
 }
 
-function loadFromExport(index) {
+async function loadFromExport(index) {
     try {
         const exports = JSON.parse(localStorage.getItem('sopExports') || '[]');
         if (index >= 0 && index < exports.length) {
             const exportItem = exports[index];
-            // Load full data from savedSops since we only store metadata in exports
-            const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+            // Load full data from GitHub since we only store metadata in exports
+            let savedSops = {};
+            if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+                try {
+                    const loaded = await loadAllSopsFromGitHubRepo();
+                    savedSops = loaded || {};
+                } catch (error) {
+                    console.error('❌ Error loading from GitHub:', error);
+                    showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
+                    return;
+                }
+            } else {
+                showNotification('GitHub storage not available', 'error');
+                return;
+            }
+            
             const sop = savedSops[exportItem.sopId];
             if (sop) {
                 const sopData = { ...sop };
@@ -1495,7 +1535,22 @@ async function downloadAllExports() {
             return;
         }
         
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // Load from GitHub
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                showNotification('Error loading SOPs from GitHub: ' + error.message, 'error');
+                return;
+            }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            return;
+        }
+        
         exports.forEach((exportItem, index) => {
             setTimeout(() => {
                 const sop = savedSops[exportItem.sopId];
@@ -2351,9 +2406,19 @@ function switchTab(tabName) {
 let allSops = [];
 let filteredSops = [];
 
-function refreshRegister() {
+async function refreshRegister() {
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                savedSops = {};
+            }
+        }
         allSops = [];
         
         Object.keys(savedSops).forEach(key => {
@@ -2469,19 +2534,20 @@ function renderRegisterTable(sops) {
 
 async function loadSopFromRegister(key) {
     try {
-        // Try to load from GitHub Repository first (shared database)
-        let savedSops = null;
+        // LOAD FROM GITHUB ONLY - NO LOCALSTORAGE
+        let savedSops = {};
         if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
             try {
-                savedSops = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
             } catch (error) {
-                console.error('GitHub load failed, using localStorage:', error);
+                console.error('❌ Error loading from GitHub:', error);
+                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
+                return;
             }
-        }
-        
-        // Fallback to localStorage if GitHub not available
-        if (!savedSops) {
-            savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            return;
         }
         
         const sop = savedSops[key];
@@ -2505,7 +2571,22 @@ async function loadSopFromRegister(key) {
 
 async function exportSopPdfFromRegister(key) {
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
+                return;
+            }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            return;
+        }
+        
         const sop = savedSops[key];
         
         if (!sop) {
@@ -2541,17 +2622,21 @@ async function deleteSopFromRegister(key) {
     }
     
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
-        delete savedSops[key];
-        localStorage.setItem('savedSops', JSON.stringify(savedSops));
-        
-        // If current SOP is deleted, clear it
-        if (currentSop.meta.sopId === key) {
-            createNewSop();
+        // DELETE FROM GITHUB ONLY - NO LOCALSTORAGE
+        if (typeof deleteSopFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            await deleteSopFromGitHubRepo(key);
+            console.log('✅ SOP deleted from GitHub:', key);
+            
+            // If current SOP is deleted, clear it
+            if (currentSop.meta.sopId === key) {
+                createNewSop();
+            }
+            
+            await refreshRegister();
+            showNotification('SOP deleted successfully.', 'success');
+        } else {
+            showNotification('GitHub storage not available', 'error');
         }
-        
-        refreshRegister();
-        showNotification('SOP deleted successfully.', 'success');
     } catch (e) {
         showNotification('Error deleting SOP: ' + e.message, 'error');
         console.error('Error:', e);
@@ -2986,19 +3071,18 @@ let currentReviewSopKey = null;
 
 async function refreshReviewList() {
     try {
-        // Try to load from GitHub Repository first (shared database)
-        let savedSops = null;
+        // LOAD FROM GITHUB ONLY - NO LOCALSTORAGE
+        let savedSops = {};
         if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
             try {
-                savedSops = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
             } catch (error) {
-                console.error('GitHub load failed, using localStorage:', error);
+                console.error('❌ Error loading from GitHub:', error);
+                savedSops = {};
             }
-        }
-        
-        // Fallback to localStorage if GitHub not available
-        if (!savedSops) {
-            savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        } else {
+            savedSops = {};
         }
         
         reviewSops = [];
@@ -3234,7 +3318,22 @@ async function approveSopInline(sopKey) {
     }
     
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
+                return;
+            }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            return;
+        }
+        
         const sop = savedSops[sopKey];
         
         if (!sop) {
@@ -3249,18 +3348,20 @@ async function approveSopInline(sopKey) {
         sop.meta.reviewDate = reviewDate;
         sop.reviewedAt = new Date().toISOString();
         
-        // Save to GitHub Repository (shared database)
+        // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
         if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
             try {
                 await saveSopToGitHubRepo(sop);
+                console.log('✅ SOP approved and saved to GitHub');
             } catch (error) {
-                console.error('Error saving to GitHub:', error);
+                console.error('❌ Error saving to GitHub:', error);
+                showNotification('Error saving to GitHub: ' + error.message, 'error');
+                throw error;
             }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            throw new Error('GitHub storage not available');
         }
-        
-        // Also save to localStorage as backup
-        savedSops[sopKey] = sop;
-        localStorage.setItem('savedSops', JSON.stringify(savedSops));
         
         showNotification('SOP approved! Generating PDF...', 'info');
         
@@ -3348,7 +3449,22 @@ async function rejectSopInline(sopKey) {
     }
     
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
+                return;
+            }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            return;
+        }
+        
         const sop = savedSops[sopKey];
         
         if (!sop) {
@@ -3363,20 +3479,44 @@ async function rejectSopInline(sopKey) {
         sop.meta.reviewDate = reviewDate;
         sop.reviewedAt = new Date().toISOString();
         
-        savedSops[sopKey] = sop;
-        localStorage.setItem('savedSops', JSON.stringify(savedSops));
-        
-        showNotification('SOP returned to Draft status. Author can make changes based on your comments.', 'success');
-        refreshReviewList();
+        // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
+        if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                await saveSopToGitHubRepo(sop);
+                console.log('✅ SOP rejected and saved to GitHub');
+                showNotification('SOP returned to Draft status. Author can make changes based on your comments.', 'success');
+                await refreshReviewList();
+            } catch (error) {
+                console.error('❌ Error saving to GitHub:', error);
+                showNotification('Error saving to GitHub: ' + error.message, 'error');
+            }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+        }
     } catch (e) {
         showNotification('Error rejecting SOP: ' + e.message, 'error');
         console.error('Error:', e);
     }
 }
 
-function generatePdfFromReviewKey(sopKey) {
+async function generatePdfFromReviewKey(sopKey) {
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
+                return;
+            }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            return;
+        }
+        
         const sop = savedSops[sopKey];
         
         if (!sop) {
@@ -3419,9 +3559,24 @@ function downloadPdfFromReview(sopKey) {
     document.body.removeChild(link);
 }
 
-function viewSopForReview(sopKey) {
+async function viewSopForReview(sopKey) {
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
+                return;
+            }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            return;
+        }
+        
         const sop = savedSops[sopKey];
         
         if (!sop) {
@@ -3580,7 +3735,22 @@ async function approveSopFromReviewView() {
     }
     
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
+                return;
+            }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            return;
+        }
+        
         const sop = savedSops[currentReviewSopKey];
         
         if (!sop) {
@@ -3599,18 +3769,20 @@ async function approveSopFromReviewView() {
         sop.meta.reviewDate = reviewDate;
         sop.reviewedAt = new Date().toISOString();
         
-        // Save to GitHub Repository (shared database)
+        // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
         if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
             try {
                 await saveSopToGitHubRepo(sop);
+                console.log('✅ SOP approved and saved to GitHub');
             } catch (error) {
-                console.error('Error saving to GitHub:', error);
+                console.error('❌ Error saving to GitHub:', error);
+                showNotification('Error saving to GitHub: ' + error.message, 'error');
+                throw error;
             }
+        } else {
+            showNotification('GitHub storage not available', 'error');
+            throw new Error('GitHub storage not available');
         }
-        
-        // Also save to localStorage as backup
-        savedSops[currentReviewSopKey] = sop;
-        localStorage.setItem('savedSops', JSON.stringify(savedSops));
         
         showNotification('SOP approved! Generating PDF...', 'info');
         
@@ -3690,9 +3862,20 @@ window.rejectSopFromReviewView = rejectSopFromReviewView;
 // Tasks & Progress Tracker Functions
 let sopTasks = [];
 
-function refreshProgressTracker() {
+async function refreshProgressTracker() {
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // LOAD FROM GITHUB ONLY
+        let savedSops = {};
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                const loaded = await loadAllSopsFromGitHubRepo();
+                savedSops = loaded || {};
+            } catch (error) {
+                console.error('❌ Error loading from GitHub:', error);
+                savedSops = {};
+            }
+        }
+        
         const progressData = calculateMonthlyProgress(savedSops);
         renderProgressTracker(progressData);
     } catch (e) {
@@ -4305,8 +4488,8 @@ function populateAllReviewerDropdowns() {
     populateReviewerDropdown('reviewViewerName');
     
     // Populate all inline reviewer dropdowns in the review list
-    const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
-    Object.keys(savedSops).forEach(key => {
+    // Note: This will be populated when review list is refreshed from GitHub
+    // For now, just populate the main review view dropdown
         const sop = savedSops[key];
         const dropdownId = `reviewerName-${key}`;
         populateReviewerDropdown(dropdownId, sop.meta.reviewer || '');

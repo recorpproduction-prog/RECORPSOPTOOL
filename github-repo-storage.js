@@ -50,8 +50,14 @@ async function githubApiRequest(endpoint, options = {}) {
     }
     
     const url = `https://api.github.com${endpoint}`;
+    
+    // Use Bearer for newer tokens, token for classic tokens
+    const authHeader = githubRepoStorage.token.startsWith('ghp_') || githubRepoStorage.token.startsWith('github_pat_')
+        ? `Bearer ${githubRepoStorage.token}`
+        : `token ${githubRepoStorage.token}`;
+    
     const headers = {
-        'Authorization': `token ${githubRepoStorage.token}`,
+        'Authorization': authHeader,
         'Accept': 'application/vnd.github.v3+json',
         'Content-Type': 'application/json',
         ...options.headers
@@ -63,7 +69,13 @@ async function githubApiRequest(endpoint, options = {}) {
     });
     
     if (!response.ok) {
-        const error = await response.json().catch(() => ({ message: response.statusText }));
+        const errorText = await response.text();
+        let error;
+        try {
+            error = JSON.parse(errorText);
+        } catch {
+            error = { message: errorText || response.statusText };
+        }
         throw new Error(`GitHub API error: ${error.message || response.statusText} (${response.status})`);
     }
     
@@ -97,7 +109,10 @@ async function saveFileToRepo(path, content, message = 'Update SOP') {
         const existing = await githubApiRequest(`/repos/${githubRepoStorage.owner}/${githubRepoStorage.repo}/contents/${path}`);
         sha = existing.sha;
     } catch (error) {
-        // File doesn't exist, that's okay
+        // File doesn't exist, that's okay - we'll create it
+        if (!error.message.includes('404')) {
+            console.warn('Error checking file existence:', error);
+        }
     }
     
     const encodedContent = btoa(JSON.stringify(content, null, 2));
@@ -118,26 +133,36 @@ async function saveFileToRepo(path, content, message = 'Update SOP') {
     });
 }
 
-// Save SOP to GitHub repository (shared database)
+// Save SOP to GitHub repository - PRIMARY STORAGE
 async function saveSopToGitHubRepo(sop) {
     if (!githubRepoStorage.isEnabled) {
-        return false;
+        throw new Error('GitHub storage not enabled. Please check your repository configuration.');
     }
     
+    // Check if repository exists first
     try {
-        const sopId = sop.meta.sopId || `sop-${Date.now()}`;
-        sop.meta.sopId = sopId; // Ensure SOP ID is set
-        
-        const fileName = `sops/${sopId}.json`;
-        const message = `Save SOP: ${sop.meta.title || sopId}`;
-        
-        await saveFileToRepo(fileName, sop, message);
-        console.log('✅ SOP saved to GitHub repository:', sopId);
-        return true;
+        await githubApiRequest(`/repos/${githubRepoStorage.owner}/${githubRepoStorage.repo}`);
     } catch (error) {
-        console.error('❌ Error saving SOP to GitHub:', error);
+        if (error.message.includes('404')) {
+            throw new Error(`Repository ${githubRepoStorage.owner}/${githubRepoStorage.repo} does not exist. Please create it on GitHub.`);
+        }
         throw error;
     }
+    
+    const sopId = sop.meta.sopId || `sop-${Date.now()}`;
+    sop.meta.sopId = sopId; // Ensure SOP ID is set
+    
+    // Add savedAt timestamp if not present
+    if (!sop.savedAt) {
+        sop.savedAt = new Date().toISOString();
+    }
+    
+    const fileName = `sops/${sopId}.json`;
+    const message = `Save SOP: ${sop.meta.title || sopId}`;
+    
+    await saveFileToRepo(fileName, sop, message);
+    console.log('✅ SOP saved to GitHub repository:', sopId);
+    return true;
 }
 
 // Load all SOPs from GitHub repository (shared database)
@@ -147,8 +172,34 @@ async function loadAllSopsFromGitHubRepo() {
     }
     
     try {
+        // First check if repository exists
+        try {
+            await githubApiRequest(`/repos/${githubRepoStorage.owner}/${githubRepoStorage.repo}`);
+        } catch (error) {
+            if (error.message.includes('404')) {
+                console.log('📝 Repository does not exist yet - will use localStorage until repo is created');
+                return null; // Return null to use localStorage
+            }
+            throw error;
+        }
+        
         // Get all files in sops/ directory
-        const files = await githubApiRequest(`/repos/${githubRepoStorage.owner}/${githubRepoStorage.repo}/contents/sops`);
+        let files = [];
+        try {
+            files = await githubApiRequest(`/repos/${githubRepoStorage.owner}/${githubRepoStorage.repo}/contents/sops`);
+        } catch (error) {
+            if (error.message.includes('404')) {
+                // sops/ directory doesn't exist yet, that's okay
+                console.log('📝 No SOPs directory found yet - will create on first save');
+                return {}; // Return empty object, not null
+            }
+            throw error;
+        }
+        
+        // Handle case where files is not an array
+        if (!Array.isArray(files)) {
+            files = [files];
+        }
         
         const sops = {};
         
@@ -157,8 +208,9 @@ async function loadAllSopsFromGitHubRepo() {
             if (file.type === 'file' && file.name.endsWith('.json')) {
                 try {
                     const sop = await getFileFromRepo(file.path);
-                    if (sop && sop.meta && sop.meta.sopId) {
-                        sops[sop.meta.sopId] = sop;
+                    if (sop && sop.meta) {
+                        const sopKey = sop.meta.sopId || file.name.replace('.json', '');
+                        sops[sopKey] = sop;
                     }
                 } catch (error) {
                     console.warn('Error loading SOP file:', file.name, error);
@@ -169,13 +221,8 @@ async function loadAllSopsFromGitHubRepo() {
         console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from GitHub repository`);
         return sops;
     } catch (error) {
-        if (error.message.includes('404')) {
-            // sops/ directory doesn't exist yet, that's okay
-            console.log('No SOPs directory found, will create on first save');
-            return {};
-        }
-        console.error('❌ Error loading SOPs from GitHub:', error);
-        throw error;
+        console.warn('⚠️ Could not load from GitHub (using localStorage):', error.message);
+        return null; // Return null to fall back to localStorage
     }
 }
 
@@ -213,14 +260,35 @@ async function deleteSopFromGitHubRepo(sopId) {
     }
 }
 
-// Initialize on page load
+// Initialize on page load - wait for config to be available
 document.addEventListener('DOMContentLoaded', function() {
-    const initialized = initGitHubRepoStorage();
-    if (initialized) {
-        console.log('🚀 Using GitHub Repository for shared SOP storage');
-    } else {
-        console.log('⚠️ GitHub Repository storage not available, using localStorage fallback');
-    }
+    // Small delay to ensure config is loaded
+    setTimeout(() => {
+        const initialized = initGitHubRepoStorage();
+        if (initialized) {
+            console.log('🚀 GitHub Repository Storage initialized');
+            console.log('Repository:', `${githubRepoStorage.owner}/${githubRepoStorage.repo}`);
+            
+            // Try to load from GitHub (non-blocking, silent failure)
+            loadAllSopsFromGitHubRepo().then(sops => {
+                if (sops !== null) {
+                    if (Object.keys(sops).length > 0) {
+                        console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from GitHub - syncing to localStorage`);
+                        // Merge with existing localStorage (GitHub takes priority)
+                        const existing = JSON.parse(localStorage.getItem('savedSops') || '{}');
+                        const merged = { ...existing, ...sops };
+                        localStorage.setItem('savedSops', JSON.stringify(merged));
+                    }
+                } else {
+                    console.log('📝 Using localStorage (GitHub repo not created yet)');
+                }
+            }).catch(() => {
+                // Silent failure - localStorage is primary
+            });
+        } else {
+            console.log('📝 Using localStorage only (GitHub not configured)');
+        }
+    }, 100);
 });
 
 // Make functions globally available
