@@ -1,3 +1,6 @@
+// DIAGNOSTIC: Script loading started
+console.log('🔍 DIAG: app.js script started loading');
+
 // SOP Application State
 let currentSop = {
     meta: {
@@ -182,16 +185,41 @@ async function preloadLogo() {
 }
 
 // Make critical functions available immediately (before DOMContentLoaded)
+// DIAGNOSTIC: Making critical functions available immediately
+console.log('🔍 DIAG: Setting up global function stubs');
+
 // These are stubs that will be replaced with full implementations below
 window.switchTab = function(tabName) {
-    console.warn('switchTab not loaded yet');
+    console.warn('⚠️ switchTab stub called - implementation not loaded yet');
+    // Try to call implementation if it exists
+    if (typeof window._switchTabImpl === 'function') {
+        return window._switchTabImpl(tabName);
+    }
 };
+
 window.submitSopRequest = function(event) {
+    console.warn('⚠️ submitSopRequest stub called - implementation not loaded yet');
     if (event && typeof event.preventDefault === 'function') {
         event.preventDefault();
     }
+    // Try to call implementation if it exists
+    if (typeof window._submitSopRequestImpl === 'function') {
+        return window._submitSopRequestImpl(event);
+    }
     return false;
 };
+
+window.openEmailSettings = async function() {
+    console.warn('⚠️ openEmailSettings stub called - checking for implementation...');
+    // Try to call implementation if it exists
+    if (typeof window._openEmailSettingsImpl === 'function') {
+        console.log('✅ Found implementation, calling it');
+        return await window._openEmailSettingsImpl();
+    }
+    console.error('❌ Implementation not found yet');
+};
+
+console.log('🔍 DIAG: Global function stubs set');
 
 // Initialize application
 document.addEventListener('DOMContentLoaded', async function() {
@@ -3070,9 +3098,25 @@ function deleteRequest(requestId) {
     });
 }
 
+// DIAGNOSTIC: Replacing stubs with full implementations
+console.log('🔍 DIAG: Replacing function stubs with implementations');
+
 // Update the global functions to point to implementations
-window.switchTab = window._switchTabImpl;
-window.submitSopRequest = window._submitSopRequestImpl;
+if (typeof window._switchTabImpl === 'function') {
+    window.switchTab = window._switchTabImpl;
+    console.log('✅ DIAG: switchTab implementation loaded');
+} else {
+    console.error('❌ DIAG: switchTab implementation NOT FOUND');
+}
+
+if (typeof window._submitSopRequestImpl === 'function') {
+    window.submitSopRequest = window._submitSopRequestImpl;
+    console.log('✅ DIAG: submitSopRequest implementation loaded');
+} else {
+    console.error('❌ DIAG: submitSopRequest implementation NOT FOUND');
+}
+
+console.log('🔍 DIAG: Function replacement complete');
 window.refreshRegister = refreshRegister;
 window.clearRequestForm = clearRequestForm;
 window.filterRequests = filterRequests;
@@ -4574,8 +4618,8 @@ window.editUser = editUser;
 window.deleteUser = deleteUser;
 window.updateAuthorFromUser = updateAuthorFromUser;
 
-// Email Functions
-async function openEmailSettings() {
+// Email Functions - Store implementation
+window._openEmailSettingsImpl = async function openEmailSettings() {
     const modal = document.getElementById('emailSettingsModal');
     if (!modal) return;
     
@@ -4771,7 +4815,11 @@ function updateEmailStatus() {
     }
 }
 
-window.openEmailSettings = openEmailSettings;
+// openEmailSettings already assigned above as _openEmailSettingsImpl
+if (typeof window._openEmailSettingsImpl === 'function') {
+    window.openEmailSettings = window._openEmailSettingsImpl;
+    console.log('✅ DIAG: openEmailSettings replaced with implementation');
+}
 window.closeEmailSettings = closeEmailSettings;
 window.saveEmailSettings = saveEmailSettings;
 window.testEmailConnection = testEmailConnection;
