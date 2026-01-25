@@ -182,13 +182,32 @@ async function preloadLogo() {
 }
 
 // Initialize application
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
     initializeEventListeners();
-    // Load last draft SOP from storage on page load (only on initial page load, not when switching tabs)
-    loadSopFromStorage();
     
     // Preload logo immediately
     preloadLogo();
+    
+    // Load SOPs from GitHub on startup (shared database) - CRITICAL for cross-device access
+    if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        try {
+            console.log('🔄 Loading SOPs from shared GitHub repository...');
+            const sops = await loadAllSopsFromGitHubRepo();
+            if (sops && Object.keys(sops).length > 0) {
+                console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from shared GitHub repository`);
+                // Sync to localStorage as backup
+                localStorage.setItem('savedSops', JSON.stringify(sops));
+            } else {
+                console.log('No SOPs found in GitHub repository yet');
+            }
+        } catch (error) {
+            console.error('❌ Error loading SOPs from GitHub on startup:', error);
+            console.log('Will use localStorage as fallback');
+        }
+    }
+    
+    // Load last draft SOP from storage on page load (only on initial page load, not when switching tabs)
+    loadSopFromStorage();
     
     // Initialize requests list (front page) and switch to requests tab
     refreshRequestsList();
@@ -1226,9 +1245,30 @@ async function saveSopToStorage() {
     }
     
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
         const key = currentSop.meta.sopId || `sop-${Date.now()}`;
+        currentSop.meta.sopId = key; // Ensure SOP ID is set
         
+        // Try GitHub Repository first (shared database)
+        if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                await saveSopToGitHubRepo(currentSop);
+                console.log('✅ SOP saved to shared GitHub repository');
+                // Refresh lists
+                if (document.getElementById('sopRegister').classList.contains('active')) {
+                    refreshRegister();
+                }
+                if (document.getElementById('sopReview').classList.contains('active')) {
+                    refreshReviewList();
+                }
+                return; // Success - exit early
+            } catch (error) {
+                console.error('GitHub save failed, falling back to localStorage:', error);
+                // Continue to localStorage fallback
+            }
+        }
+        
+        // Fallback to localStorage (if GitHub not available)
+        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
         savedSops[key] = {
             ...currentSop,
             savedAt: new Date().toISOString()
@@ -1236,14 +1276,14 @@ async function saveSopToStorage() {
         localStorage.setItem('savedSops', JSON.stringify(savedSops));
         localStorage.setItem('currentSop', JSON.stringify(currentSop));
         
-        // Also save to GitHub if enabled
+        // Also save to GitHub if enabled (OPTIONAL - silent failure)
         if (typeof githubStorage !== 'undefined' && githubStorage.isEnabled) {
             try {
                 await githubStorage.saveSopToGist(currentSop);
-                console.log('SOP synced to GitHub');
+                console.log('SOP synced to GitHub (optional)');
             } catch (e) {
-                console.error('GitHub sync failed:', e);
-                // Don't block save if GitHub fails
+                // Silently fail - GitHub sync is optional, don't show errors
+                console.log('GitHub sync not available (optional feature)');
             }
         }
         
@@ -2427,9 +2467,23 @@ function renderRegisterTable(sops) {
     });
 }
 
-function loadSopFromRegister(key) {
+async function loadSopFromRegister(key) {
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // Try to load from GitHub Repository first (shared database)
+        let savedSops = null;
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                savedSops = await loadAllSopsFromGitHubRepo();
+            } catch (error) {
+                console.error('GitHub load failed, using localStorage:', error);
+            }
+        }
+        
+        // Fallback to localStorage if GitHub not available
+        if (!savedSops) {
+            savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        }
+        
         const sop = savedSops[key];
         
         if (sop) {
@@ -2930,9 +2984,23 @@ let reviewSops = [];
 let filteredReviewSops = [];
 let currentReviewSopKey = null;
 
-function refreshReviewList() {
+async function refreshReviewList() {
     try {
-        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        // Try to load from GitHub Repository first (shared database)
+        let savedSops = null;
+        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                savedSops = await loadAllSopsFromGitHubRepo();
+            } catch (error) {
+                console.error('GitHub load failed, using localStorage:', error);
+            }
+        }
+        
+        // Fallback to localStorage if GitHub not available
+        if (!savedSops) {
+            savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        }
+        
         reviewSops = [];
         
         console.log('=== REFRESH REVIEW LIST DEBUG ===');
@@ -3181,6 +3249,16 @@ async function approveSopInline(sopKey) {
         sop.meta.reviewDate = reviewDate;
         sop.reviewedAt = new Date().toISOString();
         
+        // Save to GitHub Repository (shared database)
+        if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                await saveSopToGitHubRepo(sop);
+            } catch (error) {
+                console.error('Error saving to GitHub:', error);
+            }
+        }
+        
+        // Also save to localStorage as backup
         savedSops[sopKey] = sop;
         localStorage.setItem('savedSops', JSON.stringify(savedSops));
         
@@ -3521,6 +3599,16 @@ async function approveSopFromReviewView() {
         sop.meta.reviewDate = reviewDate;
         sop.reviewedAt = new Date().toISOString();
         
+        // Save to GitHub Repository (shared database)
+        if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            try {
+                await saveSopToGitHubRepo(sop);
+            } catch (error) {
+                console.error('Error saving to GitHub:', error);
+            }
+        }
+        
+        // Also save to localStorage as backup
         savedSops[currentReviewSopKey] = sop;
         localStorage.setItem('savedSops', JSON.stringify(savedSops));
         
@@ -3887,10 +3975,15 @@ async function openGitHubSettings() {
     const modal = document.getElementById('githubSettingsModal');
     if (!modal) return;
     
-    // Initialize GitHub storage
+    // Initialize GitHub storage silently - don't show errors
     if (typeof githubStorage !== 'undefined') {
-        await githubStorage.initialize();
-        updateGitHubStatus();
+        try {
+            await githubStorage.initialize();
+            updateGitHubStatus();
+        } catch (e) {
+            // Silently handle - GitHub is optional
+            console.log('GitHub storage optional feature');
+        }
     }
     
     modal.classList.remove('hidden');
@@ -3975,11 +4068,21 @@ function updateGitHubStatus() {
     }
 }
 
-// Initialize GitHub storage on page load
+// Initialize GitHub storage on page load (SILENT - no errors if fails)
 document.addEventListener('DOMContentLoaded', async function() {
+    // GitHub storage is OPTIONAL - don't block or prompt users
+    // Only initialize if user has previously set it up
     if (typeof githubStorage !== 'undefined') {
-        await githubStorage.initialize();
-        updateGitHubStatus();
+        try {
+            await githubStorage.initialize();
+            // Only update status if user has previously connected
+            if (githubStorage.isEnabled) {
+                updateGitHubStatus();
+            }
+        } catch (e) {
+            // Silently fail - GitHub storage is optional
+            console.log('GitHub storage not available (optional feature)');
+        }
     }
     // Initialize email status
     updateEmailStatus();

@@ -10,7 +10,8 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
+    <!-- Main App -->
+    <div id="mainApp" class="container">
         <header>
             <div class="header-top">
                 <img src="Recorp_logo.png" alt="Recorp Logo" class="header-logo">
@@ -30,7 +31,6 @@
                 <button id="loadSopBtn" class="btn btn-secondary">Load SOP</button>
                 <button id="saveSopBtn" class="btn btn-primary">Save SOP</button>
                 <button id="emailSettingsBtn" class="btn btn-secondary" onclick="openEmailSettings()" title="Email Settings">📧 Email</button>
-                <button id="githubSyncBtn" class="btn btn-secondary" onclick="openGitHubSettings()" title="GitHub Cloud Sync">☁️ Sync</button>
             </div>
         </header>
 
@@ -633,10 +633,25 @@
         </div>
     </div>
 
+    <!-- GitHub Repository Configuration -->
+    <script>
+        // GitHub Repository Configuration for Shared SOP Storage
+        // TODO: Replace YOUR_GITHUB_USERNAME with your actual GitHub username
+        const githubRepoConfig = {
+            token: "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",
+            owner: "recorpproduction-prog", // GitHub username
+            repo: "recorp-sops-data" // Repository name - create this repo on GitHub
+        };
+        
+        // Make config available globally
+        window.githubRepoConfig = githubRepoConfig;
+    </script>
+    
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+    <script src="github-repo-storage.js"></script>
     <script src="github-storage.js"></script>
     <script src="app.js"></script>
 </body>
