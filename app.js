@@ -1,5 +1,6 @@
 // DIAGNOSTIC: Script loading started
-console.log('🔍 DIAG: app.js script started loading');
+// VERSION 4 - Cache busting - If you see this, new code is loaded!
+console.log('🔍 DIAG: app.js VERSION 4 script started loading at', new Date().toISOString());
 
 // SOP Application State
 let currentSop = {
@@ -194,6 +195,15 @@ window.switchTab = function(tabName) {
     // Try to call implementation if it exists
     if (typeof window._switchTabImpl === 'function') {
         return window._switchTabImpl(tabName);
+    }
+};
+
+// Stub for updateAuthorFromUser - will be replaced with full implementation
+window.updateAuthorFromUser = function() {
+    console.warn('⚠️ updateAuthorFromUser stub called - implementation not loaded yet');
+    // Try to call implementation if it exists
+    if (typeof window._updateAuthorFromUserImpl === 'function') {
+        return window._updateAuthorFromUserImpl();
     }
 };
 
@@ -1297,34 +1307,44 @@ async function saveSopToStorage() {
         const key = currentSop.meta.sopId || `sop-${Date.now()}`;
         currentSop.meta.sopId = key; // Ensure SOP ID is set
         
-        // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
+        // SAVE TO GITHUB with localStorage fallback
+        let savedToGitHub = false;
         if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
             try {
                 await saveSopToGitHubRepo(currentSop);
                 console.log('✅ SOP saved to GitHub repository');
-                
-                // Refresh lists after GitHub save
-                if (document.getElementById('sopRegister').classList.contains('active')) {
-                    await refreshRegister();
-                }
-                if (document.getElementById('sopReview').classList.contains('active')) {
-                    await refreshReviewList();
-                }
+                savedToGitHub = true;
             } catch (error) {
                 console.error('❌ Error saving to GitHub:', error);
-                // Show detailed error message
+                // Show warning but continue to localStorage fallback
                 let errorMsg = error.message || 'Unknown error';
                 if (errorMsg.includes('401') || errorMsg.includes('Bad credentials')) {
-                    errorMsg = 'GitHub authentication failed. Please check your token in index.html has the correct permissions (repo scope).';
+                    errorMsg = 'GitHub auth failed - using local storage. Fix token: needs repo scope.';
                 } else if (errorMsg.includes('404')) {
-                    errorMsg = `Repository not found. Please create ${githubRepoStorage?.owner || 'your'}/${githubRepoStorage?.repo || 'recorp-sops-data'} on GitHub.`;
+                    errorMsg = `Repository not found - using local storage. Create repo on GitHub.`;
                 }
-                showNotification('Error saving to GitHub: ' + errorMsg, 'error');
-                throw error; // Don't continue if GitHub save fails
+                showNotification('GitHub unavailable: ' + errorMsg + ' Saved locally instead.', 'warning');
+                // Continue to localStorage fallback - don't throw
             }
-        } else {
-            showNotification('GitHub storage not configured. Please check your repository settings.', 'error');
-            throw new Error('GitHub storage not available');
+        }
+        
+        // FALLBACK: Always save to localStorage (works even if GitHub fails)
+        const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        savedSops[key] = {
+            ...currentSop,
+            savedAt: new Date().toISOString()
+        };
+        localStorage.setItem('savedSops', JSON.stringify(savedSops));
+        console.log('✅ SOP saved to localStorage' + (savedToGitHub ? ' and GitHub' : ' (GitHub unavailable)'));
+        
+        showNotification('SOP saved successfully!', 'success');
+        
+        // Refresh lists after save
+        if (document.getElementById('sopRegister').classList.contains('active')) {
+            await refreshRegister();
+        }
+        if (document.getElementById('sopReview').classList.contains('active')) {
+            await refreshReviewList();
         }
         
         // Also save to GitHub if enabled (OPTIONAL - silent failure)
@@ -3116,6 +3136,15 @@ if (typeof window._submitSopRequestImpl === 'function') {
     console.error('❌ DIAG: submitSopRequest implementation NOT FOUND');
 }
 
+// Assign updateAuthorFromUser implementation
+if (typeof updateAuthorFromUser === 'function') {
+    window._updateAuthorFromUserImpl = updateAuthorFromUser;
+    window.updateAuthorFromUser = updateAuthorFromUser;
+    console.log('✅ DIAG: updateAuthorFromUser implementation loaded');
+} else {
+    console.error('❌ DIAG: updateAuthorFromUser implementation NOT FOUND');
+}
+
 console.log('🔍 DIAG: Function replacement complete');
 window.refreshRegister = refreshRegister;
 window.clearRequestForm = clearRequestForm;
@@ -4526,6 +4555,17 @@ function populateUserDropdown() {
         }
         authorSelect.appendChild(option);
     });
+}
+
+function updateAuthorFromUser() {
+    const authorSelect = document.getElementById('author');
+    if (!authorSelect || !currentSop) return;
+    
+    const selectedAuthor = authorSelect.value;
+    if (selectedAuthor) {
+        currentSop.meta.author = selectedAuthor;
+        console.log('Author updated to:', selectedAuthor);
+    }
 }
 
 function populateReviewerDropdown(dropdownId, currentReviewer = '') {

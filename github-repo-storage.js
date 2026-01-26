@@ -1,6 +1,8 @@
 // GitHub Repository Storage - Shared Database for All SOPs
 // Uses GitHub Repository API to store SOPs as JSON files
 // All users see all SOPs (shared database)
+// VERSION 4 - Cache busting - If you see this, new code is loaded!
+console.log('🔍 DIAG: github-repo-storage.js VERSION 4 loaded at', new Date().toISOString());
 
 let githubRepoStorage = {
     token: null,
@@ -12,14 +14,18 @@ let githubRepoStorage = {
 // Initialize GitHub Repository Storage
 function initGitHubRepoStorage() {
     if (!window.githubRepoConfig) {
-        console.log('GitHub repo config not found');
+        console.log('❌ GitHub repo config not found');
+        console.log('🔍 DIAG: window.githubRepoConfig is:', window.githubRepoConfig);
         return false;
     }
     
     const config = window.githubRepoConfig;
     
     if (!config.token || !config.owner || !config.repo) {
-        console.warn('GitHub repo config incomplete. Please check index.html');
+        console.warn('❌ GitHub repo config incomplete. Please check index.html');
+        console.log('🔍 DIAG: token exists?', !!config.token);
+        console.log('🔍 DIAG: owner exists?', !!config.owner);
+        console.log('🔍 DIAG: repo exists?', !!config.repo);
         return false;
     }
     
@@ -29,13 +35,27 @@ function initGitHubRepoStorage() {
         return false;
     }
     
-    githubRepoStorage.token = config.token;
-    githubRepoStorage.owner = config.owner;
-    githubRepoStorage.repo = config.repo;
+    // Trim token in case of whitespace
+    const token = config.token.trim();
+    console.log('🔍 DIAG: Original token length:', config.token.length);
+    console.log('🔍 DIAG: Trimmed token length:', token.length);
+    console.log('🔍 DIAG: Token has whitespace?', config.token !== token);
+    
+    githubRepoStorage.token = token;
+    githubRepoStorage.owner = config.owner.trim();
+    githubRepoStorage.repo = config.repo.trim();
     githubRepoStorage.isEnabled = true;
     
     console.log('✅ GitHub Repository Storage initialized');
     console.log('Repository:', `${config.owner}/${config.repo}`);
+    console.log('🔍 DIAG: Token type:', config.token.startsWith('ghp_') ? 'Classic (ghp_)' : config.token.startsWith('github_pat_') ? 'Fine-grained (github_pat_)' : 'Unknown');
+    console.log('🔍 DIAG: Token preview:', config.token.substring(0, 15) + '...');
+    console.log('🔍 DIAG: Full token length:', config.token.length);
+    console.log('🔍 DIAG: Token starts with ghp_?', config.token.startsWith('ghp_'));
+    console.log('🔍 DIAG: Token starts with github_pat_?', config.token.startsWith('github_pat_'));
+    console.log('🔍 DIAG: Will use auth header:', config.token.startsWith('github_pat_') ? 'Bearer' : 'token');
+    console.log('🔍 DIAG: Actual token value (first 20 chars):', config.token.substring(0, 20));
+    console.log('🔍 DIAG: Actual token value (last 20 chars):', config.token.substring(config.token.length - 20));
     
     return true;
 }
@@ -49,9 +69,19 @@ async function githubApiRequest(endpoint, options = {}) {
     const url = `https://api.github.com${endpoint}`;
     
     // Use Bearer for newer tokens, token for classic tokens
-    const authHeader = githubRepoStorage.token.startsWith('ghp_') || githubRepoStorage.token.startsWith('github_pat_')
+    // Classic tokens (ghp_) use 'token', fine-grained (github_pat_) use 'Bearer'
+    const authHeader = githubRepoStorage.token.startsWith('github_pat_')
         ? `Bearer ${githubRepoStorage.token}`
         : `token ${githubRepoStorage.token}`;
+    
+    console.log('🔍 DIAG: Making GitHub API request to:', endpoint);
+    console.log('🔍 DIAG: Token stored length:', githubRepoStorage.token ? githubRepoStorage.token.length : 'NULL');
+    console.log('🔍 DIAG: Token stored preview:', githubRepoStorage.token ? githubRepoStorage.token.substring(0, 20) + '...' : 'NULL');
+    console.log('🔍 DIAG: Token stored last 20 chars:', githubRepoStorage.token ? '...' + githubRepoStorage.token.substring(githubRepoStorage.token.length - 20) : 'NULL');
+    console.log('🔍 DIAG: Token type:', githubRepoStorage.token.startsWith('ghp_') ? 'Classic (ghp_)' : githubRepoStorage.token.startsWith('github_pat_') ? 'Fine-grained (github_pat_)' : 'Unknown');
+    console.log('🔍 DIAG: Auth header type:', githubRepoStorage.token.startsWith('github_pat_') ? 'Bearer' : 'token');
+    console.log('🔍 DIAG: Auth header FULL (first 50 chars):', authHeader.substring(0, 50) + '...');
+    console.log('🔍 DIAG: Full URL:', url);
     
     const headers = {
         'Authorization': authHeader,
@@ -60,10 +90,19 @@ async function githubApiRequest(endpoint, options = {}) {
         ...options.headers
     };
     
+    console.log('🔍 DIAG: Request headers:', {
+        'Authorization': authHeader.substring(0, 20) + '...',
+        'Accept': headers['Accept'],
+        'Content-Type': headers['Content-Type']
+    });
+    
     const response = await fetch(url, {
         ...options,
         headers
     });
+    
+    console.log('🔍 DIAG: GitHub API response status:', response.status);
+    console.log('🔍 DIAG: Response OK:', response.ok);
     
     if (!response.ok) {
         const errorText = await response.text();
@@ -76,7 +115,10 @@ async function githubApiRequest(endpoint, options = {}) {
         
         // Provide helpful error messages
         if (response.status === 401) {
-            throw new Error(`Bad credentials (401). Your GitHub token may be invalid, expired, or missing 'repo' scope. Please check your token in index.html.`);
+            console.error('🔍 DIAG: 401 Error - Token being used:', githubRepoStorage.token ? githubRepoStorage.token.substring(0, 20) + '...' : 'NULL');
+            console.error('🔍 DIAG: 401 Error - Auth header:', authHeader.substring(0, 30) + '...');
+            console.error('🔍 DIAG: 401 Error - Expected token from config:', window.githubRepoConfig ? (window.githubRepoConfig.token ? window.githubRepoConfig.token.substring(0, 20) + '...' : 'MISSING') : 'CONFIG NOT FOUND');
+            throw new Error(`Bad credentials (401). Your GitHub token may be invalid, expired, or missing 'repo' scope. Please check your token in index.html. Token preview: ${githubRepoStorage.token ? githubRepoStorage.token.substring(0, 20) + '...' : 'NULL'}`);
         } else if (response.status === 403) {
             throw new Error(`Forbidden (403). Your token may not have permission to access this repository.`);
         } else if (response.status === 404) {
@@ -275,10 +317,19 @@ async function deleteSopFromGitHubRepo(sopId) {
 document.addEventListener('DOMContentLoaded', function() {
     // Small delay to ensure config is loaded
     setTimeout(() => {
+        console.log('🔍 DIAG: Checking for githubRepoConfig...');
+        console.log('🔍 DIAG: window.githubRepoConfig exists?', !!window.githubRepoConfig);
+        if (window.githubRepoConfig) {
+            console.log('🔍 DIAG: Config token preview:', window.githubRepoConfig.token ? window.githubRepoConfig.token.substring(0, 15) + '...' : 'MISSING');
+            console.log('🔍 DIAG: Config owner:', window.githubRepoConfig.owner);
+            console.log('🔍 DIAG: Config repo:', window.githubRepoConfig.repo);
+        }
+        
         const initialized = initGitHubRepoStorage();
         if (initialized) {
             console.log('🚀 GitHub Repository Storage initialized');
             console.log('Repository:', `${githubRepoStorage.owner}/${githubRepoStorage.repo}`);
+            console.log('🔍 DIAG: Stored token preview:', githubRepoStorage.token ? githubRepoStorage.token.substring(0, 15) + '...' : 'MISSING');
             
             // Try to load from GitHub (non-blocking, silent failure)
             loadAllSopsFromGitHubRepo().then(sops => {
@@ -288,8 +339,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     console.log('📝 No SOPs in GitHub repository yet');
                 }
             }).catch(error => {
-                // Silent failure - don't break the app
-                console.warn('⚠️ GitHub load failed (app will still work):', error.message);
+                // Show error details for debugging
+                console.error('⚠️ GitHub load failed:', error.message);
+                console.error('🔍 DIAG: Error details:', error);
             });
         } else {
             console.log('📝 Using localStorage only (GitHub not configured)');
