@@ -66,22 +66,30 @@ async function githubApiRequest(endpoint, options = {}) {
         throw new Error('GitHub storage not enabled');
     }
     
+    // CRITICAL: Ensure token is trimmed and valid
+    const token = githubRepoStorage.token ? githubRepoStorage.token.trim() : null;
+    if (!token) {
+        throw new Error('GitHub token is missing or empty');
+    }
+    
     const url = `https://api.github.com${endpoint}`;
     
     // Use Bearer for newer tokens, token for classic tokens
     // Classic tokens (ghp_) use 'token', fine-grained (github_pat_) use 'Bearer'
-    const authHeader = githubRepoStorage.token.startsWith('github_pat_')
-        ? `Bearer ${githubRepoStorage.token}`
-        : `token ${githubRepoStorage.token}`;
+    // FORCE 'token' prefix for classic tokens - this is what test page uses
+    const authHeader = token.startsWith('github_pat_')
+        ? `Bearer ${token}`
+        : `token ${token}`;
     
     console.log('🔍 DIAG: Making GitHub API request to:', endpoint);
-    console.log('🔍 DIAG: Token stored length:', githubRepoStorage.token ? githubRepoStorage.token.length : 'NULL');
-    console.log('🔍 DIAG: Token stored preview:', githubRepoStorage.token ? githubRepoStorage.token.substring(0, 20) + '...' : 'NULL');
-    console.log('🔍 DIAG: Token stored last 20 chars:', githubRepoStorage.token ? '...' + githubRepoStorage.token.substring(githubRepoStorage.token.length - 20) : 'NULL');
-    console.log('🔍 DIAG: Token type:', githubRepoStorage.token.startsWith('ghp_') ? 'Classic (ghp_)' : githubRepoStorage.token.startsWith('github_pat_') ? 'Fine-grained (github_pat_)' : 'Unknown');
-    console.log('🔍 DIAG: Auth header type:', githubRepoStorage.token.startsWith('github_pat_') ? 'Bearer' : 'token');
+    console.log('🔍 DIAG: Token stored length:', token.length);
+    console.log('🔍 DIAG: Token stored preview:', token.substring(0, 20) + '...');
+    console.log('🔍 DIAG: Token stored last 20 chars:', '...' + token.substring(token.length - 20));
+    console.log('🔍 DIAG: Token type:', token.startsWith('ghp_') ? 'Classic (ghp_)' : token.startsWith('github_pat_') ? 'Fine-grained (github_pat_)' : 'Unknown');
+    console.log('🔍 DIAG: Auth header type:', token.startsWith('github_pat_') ? 'Bearer' : 'token');
     console.log('🔍 DIAG: Auth header FULL (first 50 chars):', authHeader.substring(0, 50) + '...');
     console.log('🔍 DIAG: Full URL:', url);
+    console.log('🔍 DIAG: COMPARING - Token matches config?', token === (window.githubRepoConfig ? window.githubRepoConfig.token.trim() : 'NO CONFIG'));
     
     const headers = {
         'Authorization': authHeader,

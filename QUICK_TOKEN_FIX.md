@@ -43,3 +43,5 @@ The app works with localStorage now. GitHub is just for cloud sync. You can:
 2. Fix GitHub token when you have time
 3. Once fixed, it will automatically sync to GitHub
 
+
+

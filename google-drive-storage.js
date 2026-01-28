@@ -1,0 +1,441 @@
+// Google Drive Storage - Shared Database for All SOPs
+// Uses Google Drive API to store SOPs as JSON files
+// All users see all SOPs (shared database)
+console.log('📁 Google Drive Storage module loaded at', new Date().toISOString());
+
+let googleDriveStorage = {
+    clientId: null,
+    apiKey: null,
+    folderId: null,
+    isEnabled: false,
+    isAuthenticated: false,
+    accessToken: null
+};
+
+// Google Drive API configuration
+const DISCOVERY_DOCS = ['https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'];
+const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+
+// Initialize Google Drive Storage
+function initGoogleDriveStorage() {
+    // Load config from localStorage or use defaults
+    const savedConfig = localStorage.getItem('googleDriveConfig');
+    if (savedConfig) {
+        try {
+            const config = JSON.parse(savedConfig);
+            googleDriveStorage.clientId = config.clientId || null;
+            googleDriveStorage.apiKey = config.apiKey || null;
+            googleDriveStorage.folderId = config.folderId || null;
+            googleDriveStorage.isEnabled = !!(config.clientId && config.apiKey);
+        } catch (e) {
+            console.error('Error loading Google Drive config:', e);
+        }
+    }
+    
+    // Load access token if available
+    const savedToken = localStorage.getItem('googleDriveToken');
+    if (savedToken) {
+        try {
+            const tokenData = JSON.parse(savedToken);
+            if (tokenData.expires_at > Date.now()) {
+                googleDriveStorage.accessToken = tokenData.access_token;
+                googleDriveStorage.isAuthenticated = true;
+            } else {
+                // Token expired, clear it
+                localStorage.removeItem('googleDriveToken');
+            }
+        } catch (e) {
+            console.error('Error loading Google Drive token:', e);
+        }
+    }
+    
+    if (googleDriveStorage.isEnabled) {
+        console.log('✅ Google Drive Storage initialized');
+        console.log('Client ID:', googleDriveStorage.clientId ? googleDriveStorage.clientId.substring(0, 20) + '...' : 'Not set');
+        console.log('API Key:', googleDriveStorage.apiKey ? googleDriveStorage.apiKey.substring(0, 20) + '...' : 'Not set');
+        console.log('Folder ID:', googleDriveStorage.folderId || 'Not set');
+    } else {
+        console.log('⚠️ Google Drive Storage not configured');
+    }
+    
+    return googleDriveStorage.isEnabled;
+}
+
+// Save Google Drive configuration
+function saveGoogleDriveConfig(clientId, apiKey, folderId) {
+    googleDriveStorage.clientId = clientId;
+    googleDriveStorage.apiKey = apiKey;
+    googleDriveStorage.folderId = folderId;
+    googleDriveStorage.isEnabled = !!(clientId && apiKey);
+    
+    const config = {
+        clientId: clientId,
+        apiKey: apiKey,
+        folderId: folderId
+    };
+    
+    localStorage.setItem('googleDriveConfig', JSON.stringify(config));
+    console.log('✅ Google Drive config saved');
+    return true;
+}
+
+// Initialize Google API Client
+async function initGoogleAPI() {
+    return new Promise((resolve, reject) => {
+        if (window.gapi && window.gapi.client) {
+            resolve();
+            return;
+        }
+        
+        // Wait for gapi to be available (script is loaded in index.html)
+        const checkInterval = setInterval(() => {
+            if (window.gapi) {
+                clearInterval(checkInterval);
+                window.gapi.load('client:auth2', () => {
+                    resolve();
+                });
+            }
+        }, 100);
+        
+        setTimeout(() => {
+            clearInterval(checkInterval);
+            reject(new Error('Google API failed to load. Make sure the Google API script is included in index.html'));
+        }, 10000);
+    });
+}
+
+// Authenticate with Google Drive
+async function authenticateGoogleDrive() {
+    if (!googleDriveStorage.isEnabled) {
+        throw new Error('Google Drive not configured. Please set Client ID and API Key.');
+    }
+    
+    try {
+        await initGoogleAPI();
+        
+        await window.gapi.client.init({
+            apiKey: googleDriveStorage.apiKey,
+            clientId: googleDriveStorage.clientId,
+            discoveryDocs: DISCOVERY_DOCS,
+            scope: SCOPES
+        });
+        
+        const authInstance = window.gapi.auth2.getAuthInstance();
+        const user = authInstance.currentUser.get();
+        
+        if (!user.isSignedIn()) {
+            // Sign in
+            await authInstance.signIn();
+        }
+        
+        const authResponse = user.getAuthResponse();
+        googleDriveStorage.accessToken = authResponse.access_token;
+        googleDriveStorage.isAuthenticated = true;
+        
+        // Save token with expiration
+        const tokenData = {
+            access_token: authResponse.access_token,
+            expires_at: Date.now() + (authResponse.expires_in * 1000)
+        };
+        localStorage.setItem('googleDriveToken', JSON.stringify(tokenData));
+        
+        console.log('✅ Google Drive authenticated');
+        return true;
+    } catch (error) {
+        console.error('Error authenticating with Google Drive:', error);
+        googleDriveStorage.isAuthenticated = false;
+        throw error;
+    }
+}
+
+// Sign out from Google Drive
+async function signOutGoogleDrive() {
+    try {
+        if (window.gapi && window.gapi.auth2) {
+            const authInstance = window.gapi.auth2.getAuthInstance();
+            if (authInstance) {
+                await authInstance.signOut();
+            }
+        }
+        googleDriveStorage.accessToken = null;
+        googleDriveStorage.isAuthenticated = false;
+        localStorage.removeItem('googleDriveToken');
+        console.log('✅ Signed out from Google Drive');
+        return true;
+    } catch (error) {
+        console.error('Error signing out:', error);
+        return false;
+    }
+}
+
+// Get or create SOPs folder in Google Drive
+async function getSopsFolder() {
+    if (!googleDriveStorage.isAuthenticated) {
+        await authenticateGoogleDrive();
+    }
+    
+    // If folder ID is already set, verify it exists
+    if (googleDriveStorage.folderId) {
+        try {
+            const response = await window.gapi.client.drive.files.get({
+                fileId: googleDriveStorage.folderId,
+                fields: 'id, name'
+            });
+            return response.result.id;
+        } catch (error) {
+            // Folder doesn't exist or is inaccessible, create new one
+            console.log('Folder not found, creating new one...');
+        }
+    }
+    
+    // Create new folder
+    const folderMetadata = {
+        name: 'SOPs',
+        mimeType: 'application/vnd.google-apps.folder'
+    };
+    
+    try {
+        const response = await window.gapi.client.drive.files.create({
+            resource: folderMetadata,
+            fields: 'id'
+        });
+        
+        googleDriveStorage.folderId = response.result.id;
+        
+        // Save folder ID to config
+        const config = JSON.parse(localStorage.getItem('googleDriveConfig') || '{}');
+        config.folderId = response.result.id;
+        localStorage.setItem('googleDriveConfig', JSON.stringify(config));
+        
+        console.log('✅ Created SOPs folder:', response.result.id);
+        return response.result.id;
+    } catch (error) {
+        console.error('Error creating folder:', error);
+        throw error;
+    }
+}
+
+// Save SOP to Google Drive
+async function saveSopToGoogleDrive(sop) {
+    if (!googleDriveStorage.isEnabled) {
+        return false;
+    }
+    
+    try {
+        if (!googleDriveStorage.isAuthenticated) {
+            await authenticateGoogleDrive();
+        }
+        
+        const folderId = await getSopsFolder();
+        const sopId = sop.meta.sopId || `sop-${Date.now()}`;
+        const fileName = `${sopId}.json`;
+        
+        // Check if file already exists
+        let existingFileId = null;
+        try {
+            const listResponse = await window.gapi.client.drive.files.list({
+                q: `name='${fileName}' and '${folderId}' in parents and trashed=false`,
+                fields: 'files(id, name)',
+                spaces: 'drive'
+            });
+            
+            if (listResponse.result.files && listResponse.result.files.length > 0) {
+                existingFileId = listResponse.result.files[0].id;
+            }
+        } catch (error) {
+            console.warn('Error checking for existing file:', error);
+        }
+        
+        // Convert SOP to JSON
+        const jsonContent = JSON.stringify(sop, null, 2);
+        
+        if (existingFileId) {
+            // Update existing file - first update metadata, then content
+            await window.gapi.client.drive.files.update({
+                fileId: existingFileId,
+                resource: {
+                    name: fileName
+                }
+            });
+            
+            // Update file content using resumable upload
+            const updateResponse = await fetch(
+                `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`,
+                {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${googleDriveStorage.accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: jsonContent
+                }
+            );
+            
+            if (!updateResponse.ok) {
+                throw new Error(`Failed to update file: ${updateResponse.statusText}`);
+            }
+            
+            console.log('✅ SOP updated in Google Drive:', fileName);
+        } else {
+            // Create new file - first create metadata, then upload content
+            const createResponse = await window.gapi.client.drive.files.create({
+                resource: {
+                    name: fileName,
+                    parents: [folderId]
+                },
+                fields: 'id'
+            });
+            
+            const newFileId = createResponse.result.id;
+            
+            // Upload file content
+            const uploadResponse = await fetch(
+                `https://www.googleapis.com/upload/drive/v3/files/${newFileId}?uploadType=media`,
+                {
+                    method: 'PATCH',
+                    headers: {
+                        'Authorization': `Bearer ${googleDriveStorage.accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: jsonContent
+                }
+            );
+            
+            if (!uploadResponse.ok) {
+                throw new Error(`Failed to upload file: ${uploadResponse.statusText}`);
+            }
+            
+            console.log('✅ SOP saved to Google Drive:', fileName);
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('Error saving to Google Drive:', error);
+        throw error;
+    }
+}
+
+// Load all SOPs from Google Drive
+async function loadAllSopsFromGoogleDrive() {
+    if (!googleDriveStorage.isEnabled) {
+        return null;
+    }
+    
+    try {
+        if (!googleDriveStorage.isAuthenticated) {
+            await authenticateGoogleDrive();
+        }
+        
+        const folderId = await getSopsFolder();
+        
+        // List all JSON files in the folder
+        const response = await window.gapi.client.drive.files.list({
+            q: `'${folderId}' in parents and trashed=false`,
+            fields: 'files(id, name, mimeType)',
+            spaces: 'drive'
+        });
+        
+        const files = response.result.files || [];
+        const sops = {};
+        
+        // Load each SOP file
+        for (const file of files) {
+            if (file.name.endsWith('.json')) {
+                try {
+                    // Use fetch to get file content
+                    const fileResponse = await fetch(
+                        `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`,
+                        {
+                            headers: {
+                                'Authorization': `Bearer ${googleDriveStorage.accessToken}`
+                            }
+                        }
+                    );
+                    
+                    if (!fileResponse.ok) {
+                        throw new Error(`Failed to load file: ${fileResponse.statusText}`);
+                    }
+                    
+                    const jsonText = await fileResponse.text();
+                    const sop = JSON.parse(jsonText);
+                    
+                    if (sop && sop.meta) {
+                        const sopKey = sop.meta.sopId || file.name.replace('.json', '');
+                        sops[sopKey] = sop;
+                    }
+                } catch (error) {
+                    console.warn('Error loading SOP file:', file.name, error);
+                }
+            }
+        }
+        
+        console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from Google Drive`);
+        return sops;
+    } catch (error) {
+        console.error('Error loading from Google Drive:', error);
+        return null;
+    }
+}
+
+// Delete SOP from Google Drive
+async function deleteSopFromGoogleDrive(sopId) {
+    if (!googleDriveStorage.isEnabled || !googleDriveStorage.isAuthenticated) {
+        return false;
+    }
+    
+    try {
+        const folderId = await getSopsFolder();
+        const fileName = `${sopId}.json`;
+        
+        // Find the file
+        const listResponse = await window.gapi.client.drive.files.list({
+            q: `name='${fileName}' and '${folderId}' in parents and trashed=false`,
+            fields: 'files(id)',
+            spaces: 'drive'
+        });
+        
+        if (listResponse.result.files && listResponse.result.files.length > 0) {
+            const fileId = listResponse.result.files[0].id;
+            
+            // Delete the file
+            await window.gapi.client.drive.files.delete({
+                fileId: fileId
+            });
+            
+            console.log('✅ SOP deleted from Google Drive:', fileName);
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        console.error('Error deleting from Google Drive:', error);
+        return false;
+    }
+}
+
+// Check if Google Drive is enabled and authenticated
+function useGoogleDrive() {
+    return googleDriveStorage.isEnabled && googleDriveStorage.isAuthenticated;
+}
+
+// Initialize on load
+if (typeof window !== 'undefined') {
+    window.googleDriveStorage = googleDriveStorage;
+    window.saveSopToGoogleDrive = saveSopToGoogleDrive;
+    window.loadAllSopsFromGoogleDrive = loadAllSopsFromGoogleDrive;
+    window.deleteSopFromGoogleDrive = deleteSopFromGoogleDrive;
+    window.authenticateGoogleDrive = authenticateGoogleDrive;
+    window.signOutGoogleDrive = signOutGoogleDrive;
+    window.saveGoogleDriveConfig = saveGoogleDriveConfig;
+    window.useGoogleDrive = useGoogleDrive;
+    window.initGoogleDriveStorage = initGoogleDriveStorage;
+    window.getSopsFolder = getSopsFolder;
+    
+    // Auto-initialize when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initGoogleDriveStorage);
+    } else {
+        initGoogleDriveStorage();
+    }
+}
+

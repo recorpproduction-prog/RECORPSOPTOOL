@@ -31,6 +31,7 @@
                 <button id="loadSopBtn" class="btn btn-secondary">Load SOP</button>
                 <button id="saveSopBtn" class="btn btn-primary">Save SOP</button>
                 <button id="emailSettingsBtn" class="btn btn-secondary" onclick="openEmailSettings()" title="Email Settings">📧 Email</button>
+                <button id="googleDriveSettingsBtn" class="btn btn-secondary" onclick="openGoogleDriveSettings()" title="Google Drive Settings">☁️ Drive</button>
             </div>
         </header>
 
@@ -595,7 +596,77 @@
         </div>
     </div>
 
-    <!-- GitHub Storage Settings Modal -->
+    <!-- Google Drive Settings Modal -->
+    <div id="googleDriveSettingsModal" class="modal hidden">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3>Google Drive Storage</h3>
+                <button class="modal-close" onclick="closeGoogleDriveSettings()">×</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 20px;">
+                    Store your SOPs in Google Drive for cloud backup and cross-device access. All SOPs will be saved to a "SOPs" folder in your Google Drive.
+                </p>
+                
+                <div id="googleDriveStatus" style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 5px;">
+                    <strong>Status:</strong> <span id="googleDriveStatusText">Not configured</span>
+                </div>
+                
+                <div class="form-group">
+                    <label for="googleDriveClientId">Google OAuth Client ID *</label>
+                    <input type="text" id="googleDriveClientId" placeholder="xxxxx.apps.googleusercontent.com" style="width: 100%;">
+                    <small style="color: #7f8c8d; display: block; margin-top: 5px;">
+                        Get this from <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a><br>
+                        Create OAuth 2.0 Client ID credentials
+                    </small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="googleDriveApiKey">Google API Key *</label>
+                    <input type="text" id="googleDriveApiKey" placeholder="AIza..." style="width: 100%;">
+                    <small style="color: #7f8c8d; display: block; margin-top: 5px;">
+                        Get this from <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a><br>
+                        Create an API Key and enable Google Drive API
+                    </small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="googleDriveFolderId">Folder ID (Optional)</label>
+                    <input type="text" id="googleDriveFolderId" placeholder="Leave empty to auto-create 'SOPs' folder" style="width: 100%;">
+                    <small style="color: #7f8c8d; display: block; margin-top: 5px;">
+                        If you want to use an existing folder, paste its ID here. Otherwise, a new "SOPs" folder will be created automatically.
+                    </small>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap;">
+                    <button class="btn btn-primary" onclick="saveGoogleDriveConfig()">Save Configuration</button>
+                    <button class="btn btn-success" onclick="connectGoogleDrive()">Connect to Google Drive</button>
+                    <button class="btn btn-secondary" onclick="testGoogleDriveConnection()">Test Connection</button>
+                    <button class="btn btn-danger" onclick="disconnectGoogleDrive()">Disconnect</button>
+                </div>
+                
+                <div id="googleDriveSyncInfo" style="margin-top: 20px; padding: 15px; background: #e8f5e9; border-radius: 5px; display: none;">
+                    <strong>✓ Connected!</strong> Your SOPs will automatically sync to Google Drive when saved.
+                </div>
+                
+                <div style="margin-top: 20px; padding: 15px; background: #fff3cd; border-radius: 5px; border-left: 4px solid #ffc107;">
+                    <strong>Setup Instructions:</strong>
+                    <ol style="margin: 10px 0; padding-left: 20px;">
+                        <li>Go to <a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a></li>
+                        <li>Create a new project or select an existing one</li>
+                        <li>Enable the Google Drive API</li>
+                        <li>Create OAuth 2.0 Client ID credentials (Web application)</li>
+                        <li>Add your domain to authorized JavaScript origins</li>
+                        <li>Create an API Key</li>
+                        <li>Enter the Client ID and API Key above</li>
+                        <li>Click "Connect to Google Drive" to authenticate</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GitHub Storage Settings Modal (kept for backward compatibility) -->
     <div id="githubSettingsModal" class="modal hidden">
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
@@ -651,14 +722,51 @@
         console.log('🔍 DIAG: Token length:', githubRepoConfig.token.length);
         console.log('🔍 DIAG: Token starts with ghp_?', githubRepoConfig.token.startsWith('ghp_'));
         console.log('🔍 DIAG: Full token value:', githubRepoConfig.token);
+        
+        // TEST TOKEN IMMEDIATELY - Same as test page
+        (async function testTokenNow() {
+            const token = githubRepoConfig.token.trim();
+            const owner = githubRepoConfig.owner;
+            const repo = githubRepoConfig.repo;
+            
+            console.log('🔍 DIAG: Testing token NOW with same method as test page...');
+            try {
+                const response = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+                    headers: {
+                        'Authorization': `token ${token}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('✅✅✅ TOKEN TEST PASSED - Repository found:', data.full_name);
+                    console.log('✅✅✅ This means the token is VALID and should work!');
+                } else {
+                    const error = await response.json();
+                    console.error('❌❌❌ TOKEN TEST FAILED:', response.status, error.message);
+                    console.error('❌❌❌ This is the SAME token that works in test page!');
+                }
+            } catch (e) {
+                console.error('❌❌❌ TOKEN TEST ERROR:', e);
+            }
+        })();
     </script>
     
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-    <script src="github-repo-storage.js?v=4"></script>
-    <script src="github-storage.js"></script>
-    <script src="app.js?v=4"></script>
+    <!-- Google Drive API -->
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script>
+        // Force cache bust with timestamp
+        const cacheBuster = '?v=' + Date.now();
+        document.write('<script src="google-drive-storage.js' + cacheBuster + '"><\/script>');
+        // Keep GitHub storage for backward compatibility (optional)
+        // document.write('<script src="github-repo-storage.js' + cacheBuster + '"><\/script>');
+        // document.write('<script src="github-storage.js' + cacheBuster + '"><\/script>');
+        document.write('<script src="app.js' + cacheBuster + '"><\/script>');
+    </script>
 </body>
 </html>

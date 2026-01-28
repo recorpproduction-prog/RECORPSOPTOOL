@@ -239,9 +239,9 @@ document.addEventListener('DOMContentLoaded', async function() {
     preloadLogo();
     
     // Load SOPs from GitHub on startup - NON-BLOCKING (don't break app if GitHub fails)
-    if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+    if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
         // Load asynchronously without blocking app initialization
-        loadAllSopsFromGitHubRepo().then(sops => {
+        loadAllSopsFromGoogleDrive().then(sops => {
             if (sops && Object.keys(sops).length > 0) {
                 console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from GitHub repository`);
             } else {
@@ -410,9 +410,9 @@ async function getNextSequenceNumber(deptCode, year, month) {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('Error loading from GitHub for sequence:', error);
@@ -1307,35 +1307,35 @@ async function saveSopToStorage() {
         const key = currentSop.meta.sopId || `sop-${Date.now()}`;
         currentSop.meta.sopId = key; // Ensure SOP ID is set
         
-        // SAVE TO GITHUB with localStorage fallback
-        let savedToGitHub = false;
-        if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        // SAVE TO GOOGLE DRIVE with localStorage fallback
+        let savedToGoogleDrive = false;
+        if (typeof saveSopToGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                await saveSopToGitHubRepo(currentSop);
-                console.log('✅ SOP saved to GitHub repository');
-                savedToGitHub = true;
+                await saveSopToGoogleDrive(currentSop);
+                console.log('✅ SOP saved to Google Drive');
+                savedToGoogleDrive = true;
             } catch (error) {
-                console.error('❌ Error saving to GitHub:', error);
+                console.error('❌ Error saving to Google Drive:', error);
                 // Show warning but continue to localStorage fallback
                 let errorMsg = error.message || 'Unknown error';
-                if (errorMsg.includes('401') || errorMsg.includes('Bad credentials')) {
-                    errorMsg = 'GitHub auth failed - using local storage. Fix token: needs repo scope.';
-                } else if (errorMsg.includes('404')) {
-                    errorMsg = `Repository not found - using local storage. Create repo on GitHub.`;
+                if (errorMsg.includes('401') || errorMsg.includes('unauthorized')) {
+                    errorMsg = 'Google Drive auth failed - using local storage. Please reconnect.';
+                } else if (errorMsg.includes('403')) {
+                    errorMsg = 'Google Drive access denied - check permissions.';
                 }
-                showNotification('GitHub unavailable: ' + errorMsg + ' Saved locally instead.', 'warning');
+                showNotification('Google Drive unavailable: ' + errorMsg + ' Saved locally instead.', 'warning');
                 // Continue to localStorage fallback - don't throw
             }
         }
         
-        // FALLBACK: Always save to localStorage (works even if GitHub fails)
+        // FALLBACK: Always save to localStorage (works even if Google Drive fails)
         const savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
         savedSops[key] = {
             ...currentSop,
             savedAt: new Date().toISOString()
         };
         localStorage.setItem('savedSops', JSON.stringify(savedSops));
-        console.log('✅ SOP saved to localStorage' + (savedToGitHub ? ' and GitHub' : ' (GitHub unavailable)'));
+        console.log('✅ SOP saved to localStorage' + (savedToGoogleDrive ? ' and Google Drive' : ' (Google Drive unavailable)'));
         
         showNotification('SOP saved successfully!', 'success');
         
@@ -1347,18 +1347,7 @@ async function saveSopToStorage() {
             await refreshReviewList();
         }
         
-        // Also save to GitHub if enabled (OPTIONAL - silent failure)
-        if (typeof githubStorage !== 'undefined' && githubStorage.isEnabled) {
-            try {
-                await githubStorage.saveSopToGist(currentSop);
-                console.log('SOP synced to GitHub (optional)');
-            } catch (e) {
-                // Silently fail - GitHub sync is optional, don't show errors
-                console.log('GitHub sync not available (optional feature)');
-            }
-        }
-        
-        // Lists already refreshed above after GitHub save
+        // Lists already refreshed above after Google Drive save
     } catch (e) {
         if (e.name === 'QuotaExceededError') {
             // Storage is full - show user-friendly error with cleanup options
@@ -1389,24 +1378,28 @@ async function showLoadSection() {
     
     if (!section || !list) return;
     
-    list.innerHTML = '<p>Loading SOPs from GitHub...</p>';
+    list.innerHTML = '<p>Loading SOPs from Google Drive...</p>';
     section.classList.remove('hidden');
     
     try {
-        // LOAD FROM GITHUB ONLY
+        // LOAD FROM GOOGLE DRIVE
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                list.innerHTML = '<p>Error loading SOPs from GitHub: ' + error.message + '</p>';
+                console.error('❌ Error loading from Google Drive:', error);
+                list.innerHTML = '<p>Error loading SOPs from Google Drive: ' + error.message + '</p>';
                 return;
             }
         } else {
-            list.innerHTML = '<p>GitHub storage not available</p>';
-            return;
+            // Fallback to localStorage if Google Drive not available
+            savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+            if (Object.keys(savedSops).length === 0) {
+                list.innerHTML = '<p>Google Drive storage not configured. Please set up Google Drive in settings.</p>';
+                return;
+            }
         }
         
         list.innerHTML = '';
@@ -1499,9 +1492,9 @@ async function downloadExport(index) {
             const exportItem = exports[index];
             // Load full data from GitHub since we only store metadata in exports
             let savedSops = {};
-            if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
                 try {
-                    const loaded = await loadAllSopsFromGitHubRepo();
+                    const loaded = await loadAllSopsFromGoogleDrive();
                     savedSops = loaded || {};
                 } catch (error) {
                     console.error('❌ Error loading from GitHub:', error);
@@ -1540,9 +1533,9 @@ async function loadFromExport(index) {
             const exportItem = exports[index];
             // Load full data from GitHub since we only store metadata in exports
             let savedSops = {};
-            if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+            if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
                 try {
-                    const loaded = await loadAllSopsFromGitHubRepo();
+                    const loaded = await loadAllSopsFromGoogleDrive();
                     savedSops = loaded || {};
                 } catch (error) {
                     console.error('❌ Error loading from GitHub:', error);
@@ -1604,9 +1597,9 @@ async function downloadAllExports() {
         
         // Load from GitHub
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -2478,9 +2471,9 @@ async function refreshRegister() {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -2604,9 +2597,9 @@ async function loadSopFromRegister(key) {
     try {
         // LOAD FROM GITHUB ONLY - NO LOCALSTORAGE
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -2639,20 +2632,33 @@ async function loadSopFromRegister(key) {
 
 async function exportSopPdfFromRegister(key) {
     try {
-        // LOAD FROM GITHUB ONLY
+        // LOAD FROM GITHUB FIRST, THEN LOCALSTORAGE FALLBACK
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
-                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
-                return;
+                console.log('📝 Falling back to localStorage...');
+                // FALLBACK: Load from localStorage
+                try {
+                    savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+                } catch (e) {
+                    console.error('❌ Error loading from localStorage:', e);
+                    showNotification('Error loading SOP: ' + e.message, 'error');
+                    return;
+                }
             }
         } else {
-            showNotification('GitHub storage not available', 'error');
-            return;
+            // No GitHub configured - use localStorage
+            try {
+                savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+            } catch (e) {
+                console.error('❌ Error loading from localStorage:', e);
+                showNotification('Error loading SOP: ' + e.message, 'error');
+                return;
+            }
         }
         
         const sop = savedSops[key];
@@ -2691,8 +2697,8 @@ async function deleteSopFromRegister(key) {
     
     try {
         // DELETE FROM GITHUB ONLY - NO LOCALSTORAGE
-        if (typeof deleteSopFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
-            await deleteSopFromGitHubRepo(key);
+        if (typeof deleteSopFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+            await deleteSopFromGoogleDrive(key);
             console.log('✅ SOP deleted from GitHub:', key);
             
             // If current SOP is deleted, clear it
@@ -3168,9 +3174,9 @@ async function refreshReviewList() {
     try {
         // LOAD FROM GITHUB ONLY - NO LOCALSTORAGE
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3415,9 +3421,9 @@ async function approveSopInline(sopKey) {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3444,9 +3450,9 @@ async function approveSopInline(sopKey) {
         sop.reviewedAt = new Date().toISOString();
         
         // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
-        if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof saveSopToGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                await saveSopToGitHubRepo(sop);
+                await saveSopToGoogleDrive(sop);
                 console.log('✅ SOP approved and saved to GitHub');
             } catch (error) {
                 console.error('❌ Error saving to GitHub:', error);
@@ -3546,9 +3552,9 @@ async function rejectSopInline(sopKey) {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3575,9 +3581,9 @@ async function rejectSopInline(sopKey) {
         sop.reviewedAt = new Date().toISOString();
         
         // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
-        if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof saveSopToGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                await saveSopToGitHubRepo(sop);
+                await saveSopToGoogleDrive(sop);
                 console.log('✅ SOP rejected and saved to GitHub');
                 showNotification('SOP returned to Draft status. Author can make changes based on your comments.', 'success');
                 await refreshReviewList();
@@ -3598,9 +3604,9 @@ async function generatePdfFromReviewKey(sopKey) {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3656,20 +3662,33 @@ function downloadPdfFromReview(sopKey) {
 
 async function viewSopForReview(sopKey) {
     try {
-        // LOAD FROM GITHUB ONLY
+        // LOAD FROM GITHUB FIRST, THEN LOCALSTORAGE FALLBACK
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
-                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
-                return;
+                console.log('📝 Falling back to localStorage...');
+                // FALLBACK: Load from localStorage
+                try {
+                    savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+                } catch (e) {
+                    console.error('❌ Error loading from localStorage:', e);
+                    showNotification('Error loading SOP: ' + e.message, 'error');
+                    return;
+                }
             }
         } else {
-            showNotification('GitHub storage not available', 'error');
-            return;
+            // No GitHub configured - use localStorage
+            try {
+                savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+            } catch (e) {
+                console.error('❌ Error loading from localStorage:', e);
+                showNotification('Error loading SOP: ' + e.message, 'error');
+                return;
+            }
         }
         
         const sop = savedSops[sopKey];
@@ -3832,9 +3851,9 @@ async function approveSopFromReviewView() {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3865,9 +3884,9 @@ async function approveSopFromReviewView() {
         sop.reviewedAt = new Date().toISOString();
         
         // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
-        if (typeof saveSopToGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof saveSopToGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                await saveSopToGitHubRepo(sop);
+                await saveSopToGoogleDrive(sop);
                 console.log('✅ SOP approved and saved to GitHub');
             } catch (error) {
                 console.error('❌ Error saving to GitHub:', error);
@@ -3961,9 +3980,9 @@ async function refreshProgressTracker() {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGitHubRepo === 'function' && window.useGitHubRepo && window.useGitHubRepo()) {
+        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
             try {
-                const loaded = await loadAllSopsFromGitHubRepo();
+                const loaded = await loadAllSopsFromGoogleDrive();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -4346,6 +4365,128 @@ function updateGitHubStatus() {
     }
 }
 
+// Google Drive Settings Functions
+async function openGoogleDriveSettings() {
+    const modal = document.getElementById('googleDriveSettingsModal');
+    if (!modal) return;
+    
+    // Initialize Google Drive storage
+    if (typeof initGoogleDriveStorage === 'function') {
+        initGoogleDriveStorage();
+        updateGoogleDriveStatus();
+    }
+    
+    // Load current config
+    const savedConfig = localStorage.getItem('googleDriveConfig');
+    if (savedConfig) {
+        try {
+            const config = JSON.parse(savedConfig);
+            document.getElementById('googleDriveClientId').value = config.clientId || '';
+            document.getElementById('googleDriveApiKey').value = config.apiKey || '';
+            document.getElementById('googleDriveFolderId').value = config.folderId || '';
+        } catch (e) {
+            console.error('Error loading Google Drive config:', e);
+        }
+    }
+    
+    modal.classList.remove('hidden');
+}
+
+function closeGoogleDriveSettings() {
+    const modal = document.getElementById('googleDriveSettingsModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function saveGoogleDriveConfig() {
+    const clientId = document.getElementById('googleDriveClientId').value.trim();
+    const apiKey = document.getElementById('googleDriveApiKey').value.trim();
+    const folderId = document.getElementById('googleDriveFolderId').value.trim();
+    
+    if (!clientId || !apiKey) {
+        showNotification('Please enter both Client ID and API Key', 'warning');
+        return;
+    }
+    
+    if (typeof window.saveGoogleDriveConfig === 'undefined') {
+        showNotification('Google Drive storage module not loaded', 'error');
+        return;
+    }
+    
+    try {
+        window.saveGoogleDriveConfig(clientId, apiKey, folderId || null);
+        showNotification('Google Drive configuration saved!', 'success');
+        updateGoogleDriveStatus();
+    } catch (e) {
+        showNotification('Error saving configuration: ' + e.message, 'error');
+    }
+}
+
+async function connectGoogleDrive() {
+    if (!googleDriveStorage.isEnabled) {
+        showNotification('Please save configuration first (Client ID and API Key)', 'warning');
+        return;
+    }
+    
+    try {
+        await authenticateGoogleDrive();
+        showNotification('Successfully connected to Google Drive!', 'success');
+        updateGoogleDriveStatus();
+    } catch (e) {
+        showNotification('Error connecting to Google Drive: ' + e.message, 'error');
+        console.error('Google Drive connection error:', e);
+    }
+}
+
+async function testGoogleDriveConnection() {
+    if (!googleDriveStorage.isEnabled) {
+        showNotification('Google Drive not configured. Please set Client ID and API Key first.', 'warning');
+        return;
+    }
+    
+    try {
+        if (!googleDriveStorage.isAuthenticated) {
+            await authenticateGoogleDrive();
+        }
+        
+        // Test by trying to get the folder
+        const folderId = await getSopsFolder();
+        showNotification('Google Drive connection successful! Folder ID: ' + folderId, 'success');
+        updateGoogleDriveStatus();
+    } catch (e) {
+        showNotification('Connection test failed: ' + e.message, 'error');
+        console.error('Google Drive test error:', e);
+    }
+}
+
+async function disconnectGoogleDrive() {
+    try {
+        await signOutGoogleDrive();
+        showNotification('Disconnected from Google Drive', 'info');
+        updateGoogleDriveStatus();
+    } catch (e) {
+        showNotification('Error disconnecting: ' + e.message, 'error');
+    }
+}
+
+function updateGoogleDriveStatus() {
+    const statusText = document.getElementById('googleDriveStatusText');
+    const syncInfo = document.getElementById('googleDriveSyncInfo');
+    
+    if (googleDriveStorage.isEnabled && googleDriveStorage.isAuthenticated) {
+        statusText.textContent = 'Connected and Authenticated';
+        statusText.style.color = '#27ae60';
+        syncInfo.style.display = 'block';
+    } else if (googleDriveStorage.isEnabled) {
+        statusText.textContent = 'Configured but not authenticated';
+        statusText.style.color = '#f39c12';
+        syncInfo.style.display = 'none';
+    } else {
+        statusText.textContent = 'Not configured';
+        statusText.style.color = '#e74c3c';
+        syncInfo.style.display = 'none';
+    }
+}
+
 // Initialize GitHub storage on page load (SILENT - no errors if fails)
 document.addEventListener('DOMContentLoaded', async function() {
     // GitHub storage is OPTIONAL - don't block or prompt users
@@ -4364,6 +4505,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     // Initialize email status
     updateEmailStatus();
+    
+    // Initialize Google Drive storage on page load (SILENT - no errors if fails)
+    if (typeof initGoogleDriveStorage === 'function') {
+        try {
+            initGoogleDriveStorage();
+            updateGoogleDriveStatus();
+        } catch (e) {
+            // Silently fail - Google Drive storage is optional
+            console.log('Google Drive storage not available (optional feature)');
+        }
+    }
 });
 
 // User Management Functions
@@ -4866,5 +5018,11 @@ window.testEmailConnection = testEmailConnection;
 window.openGitHubSettings = openGitHubSettings;
 window.closeGitHubSettings = closeGitHubSettings;
 window.saveGitHubToken = saveGitHubToken;
+window.openGoogleDriveSettings = openGoogleDriveSettings;
+window.closeGoogleDriveSettings = closeGoogleDriveSettings;
+window.saveGoogleDriveConfig = saveGoogleDriveConfig;
+window.connectGoogleDrive = connectGoogleDrive;
+window.testGoogleDriveConnection = testGoogleDriveConnection;
+window.disconnectGoogleDrive = disconnectGoogleDrive;
 window.testGitHubConnection = testGitHubConnection;
 window.disconnectGitHub = disconnectGitHub;
