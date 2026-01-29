@@ -27,9 +27,18 @@ function initGoogleDriveStorage() {
             googleDriveStorage.apiKey = config.apiKey || null;
             googleDriveStorage.folderId = config.folderId || null;
             googleDriveStorage.isEnabled = !!(config.clientId && config.apiKey);
+            
+            console.log('📁 Loading Google Drive config from localStorage');
+            console.log('Client ID present:', !!config.clientId);
+            console.log('API Key present:', !!config.apiKey);
+            console.log('Is Enabled:', googleDriveStorage.isEnabled);
         } catch (e) {
             console.error('Error loading Google Drive config:', e);
+            googleDriveStorage.isEnabled = false;
         }
+    } else {
+        console.log('⚠️ No Google Drive config found in localStorage');
+        googleDriveStorage.isEnabled = false;
     }
     
     // Load access token if available
@@ -43,10 +52,14 @@ function initGoogleDriveStorage() {
             } else {
                 // Token expired, clear it
                 localStorage.removeItem('googleDriveToken');
+                googleDriveStorage.isAuthenticated = false;
             }
         } catch (e) {
             console.error('Error loading Google Drive token:', e);
+            googleDriveStorage.isAuthenticated = false;
         }
+    } else {
+        googleDriveStorage.isAuthenticated = false;
     }
     
     if (googleDriveStorage.isEnabled) {
@@ -54,6 +67,7 @@ function initGoogleDriveStorage() {
         console.log('Client ID:', googleDriveStorage.clientId ? googleDriveStorage.clientId.substring(0, 20) + '...' : 'Not set');
         console.log('API Key:', googleDriveStorage.apiKey ? googleDriveStorage.apiKey.substring(0, 20) + '...' : 'Not set');
         console.log('Folder ID:', googleDriveStorage.folderId || 'Not set');
+        console.log('Authenticated:', googleDriveStorage.isAuthenticated);
     } else {
         console.log('⚠️ Google Drive Storage not configured');
     }

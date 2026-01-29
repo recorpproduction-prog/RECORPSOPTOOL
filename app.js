@@ -4474,14 +4474,63 @@ async function connectGoogleDrive() {
         return;
     }
     
-    // Re-initialize to ensure config is loaded
+    // Parse config to verify it's valid
+    let config;
+    try {
+        config = JSON.parse(savedConfig);
+        if (!config.clientId || !config.apiKey) {
+            showNotification('Configuration is incomplete. Please save Client ID and API Key again.', 'warning');
+            return;
+        }
+    } catch (e) {
+        showNotification('Invalid configuration. Please save configuration again.', 'error');
+        return;
+    }
+    
+    // Re-initialize to ensure config is loaded into the storage module
     if (typeof initGoogleDriveStorage === 'function') {
         initGoogleDriveStorage();
     }
     
-    if (!googleDriveStorage || !googleDriveStorage.isEnabled) {
-        showNotification('Please save configuration first (Client ID and API Key)', 'warning');
+    // Wait a moment for initialization
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Check if storage module is available and enabled
+    if (typeof window.googleDriveStorage === 'undefined') {
+        showNotification('Google Drive storage module not loaded. Please refresh the page.', 'error');
         return;
+    }
+    
+    // Use the global storage object from window
+    const storage = window.googleDriveStorage;
+    
+    // Ensure it's initialized
+    if (typeof initGoogleDriveStorage === 'function') {
+        initGoogleDriveStorage();
+        // Wait for initialization
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    // Check if enabled after initialization
+    if (!storage || !storage.isEnabled) {
+        // Try to manually enable if we have config
+        if (config.clientId && config.apiKey) {
+            if (typeof window.saveGoogleDriveConfig === 'function') {
+                window.saveGoogleDriveConfig(config.clientId, config.apiKey, config.folderId || null);
+                // Re-initialize again
+                if (typeof initGoogleDriveStorage === 'function') {
+                    initGoogleDriveStorage();
+                }
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+        }
+        
+        // Final check
+        if (!storage.isEnabled) {
+            console.error('Storage not enabled after initialization. Config:', config);
+            showNotification('Configuration not properly loaded. Please save configuration again.', 'warning');
+            return;
+        }
     }
     
     try {
@@ -4534,23 +4583,28 @@ function updateGoogleDriveStatus() {
     const statusText = document.getElementById('googleDriveStatusText');
     const syncInfo = document.getElementById('googleDriveSyncInfo');
     
+    if (!statusText) return;
+    
     // Re-initialize to get latest status
     if (typeof initGoogleDriveStorage === 'function') {
         initGoogleDriveStorage();
     }
     
-    if (googleDriveStorage && googleDriveStorage.isEnabled && googleDriveStorage.isAuthenticated) {
+    // Use window object to ensure we get the right storage
+    const storage = window.googleDriveStorage;
+    
+    if (storage && storage.isEnabled && storage.isAuthenticated) {
         statusText.textContent = 'Connected and Authenticated';
         statusText.style.color = '#27ae60';
-        syncInfo.style.display = 'block';
-    } else if (googleDriveStorage && googleDriveStorage.isEnabled) {
+        if (syncInfo) syncInfo.style.display = 'block';
+    } else if (storage && storage.isEnabled) {
         statusText.textContent = 'Configured but not authenticated';
         statusText.style.color = '#f39c12';
-        syncInfo.style.display = 'none';
+        if (syncInfo) syncInfo.style.display = 'none';
     } else {
         statusText.textContent = 'Not configured';
         statusText.style.color = '#e74c3c';
-        syncInfo.style.display = 'none';
+        if (syncInfo) syncInfo.style.display = 'none';
     }
 }
 
