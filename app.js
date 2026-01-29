@@ -4373,22 +4373,36 @@ async function openGoogleDriveSettings() {
     // Initialize Google Drive storage
     if (typeof initGoogleDriveStorage === 'function') {
         initGoogleDriveStorage();
-        updateGoogleDriveStatus();
     }
     
-    // Load current config
+    // Load current config from localStorage
     const savedConfig = localStorage.getItem('googleDriveConfig');
+    const clientIdInput = document.getElementById('googleDriveClientId');
+    const apiKeyInput = document.getElementById('googleDriveApiKey');
+    const folderIdInput = document.getElementById('googleDriveFolderId');
+    
     if (savedConfig) {
         try {
             const config = JSON.parse(savedConfig);
-            document.getElementById('googleDriveClientId').value = config.clientId || '';
-            document.getElementById('googleDriveApiKey').value = config.apiKey || '';
-            document.getElementById('googleDriveFolderId').value = config.folderId || '';
+            
+            if (clientIdInput) clientIdInput.value = config.clientId || '';
+            // Show API key (it's password field so it will be masked)
+            if (apiKeyInput) apiKeyInput.value = config.apiKey || '';
+            if (folderIdInput) folderIdInput.value = config.folderId || '';
         } catch (e) {
             console.error('Error loading Google Drive config:', e);
+            if (clientIdInput) clientIdInput.value = '';
+            if (apiKeyInput) apiKeyInput.value = '';
+            if (folderIdInput) folderIdInput.value = '';
         }
+    } else {
+        // Clear inputs if no config
+        if (clientIdInput) clientIdInput.value = '';
+        if (apiKeyInput) apiKeyInput.value = '';
+        if (folderIdInput) folderIdInput.value = '';
     }
     
+    updateGoogleDriveStatus();
     modal.classList.remove('hidden');
 }
 
@@ -4398,31 +4412,74 @@ function closeGoogleDriveSettings() {
 }
 
 async function saveGoogleDriveConfig() {
-    const clientId = document.getElementById('googleDriveClientId').value.trim();
-    const apiKey = document.getElementById('googleDriveApiKey').value.trim();
-    const folderId = document.getElementById('googleDriveFolderId').value.trim();
+    const clientIdInput = document.getElementById('googleDriveClientId');
+    const apiKeyInput = document.getElementById('googleDriveApiKey');
+    const folderIdInput = document.getElementById('googleDriveFolderId');
+    
+    if (!clientIdInput || !apiKeyInput) {
+        showNotification('Configuration form not found', 'error');
+        return;
+    }
+    
+    const clientId = clientIdInput.value.trim();
+    const apiKey = apiKeyInput.value.trim();
+    const folderId = folderIdInput ? folderIdInput.value.trim() : '';
     
     if (!clientId || !apiKey) {
         showNotification('Please enter both Client ID and API Key', 'warning');
         return;
     }
     
+    // Validate Client ID format
+    if (!clientId.includes('.apps.googleusercontent.com')) {
+        showNotification('Invalid Client ID format. Should end with .apps.googleusercontent.com', 'warning');
+        return;
+    }
+    
+    // Validate API Key format
+    if (!apiKey.startsWith('AIza')) {
+        showNotification('Invalid API Key format. Should start with AIza', 'warning');
+        return;
+    }
+    
     if (typeof window.saveGoogleDriveConfig === 'undefined') {
-        showNotification('Google Drive storage module not loaded', 'error');
+        showNotification('Google Drive storage module not loaded. Please refresh the page.', 'error');
         return;
     }
     
     try {
-        window.saveGoogleDriveConfig(clientId, apiKey, folderId || null);
-        showNotification('Google Drive configuration saved!', 'success');
-        updateGoogleDriveStatus();
+        // Call the storage module function
+        const saved = window.saveGoogleDriveConfig(clientId, apiKey, folderId || null);
+        if (saved) {
+            // Re-initialize to load the new config
+            if (typeof initGoogleDriveStorage === 'function') {
+                initGoogleDriveStorage();
+            }
+            showNotification('Google Drive configuration saved successfully!', 'success');
+            updateGoogleDriveStatus();
+        } else {
+            showNotification('Failed to save configuration', 'error');
+        }
     } catch (e) {
         showNotification('Error saving configuration: ' + e.message, 'error');
+        console.error('Save config error:', e);
     }
 }
 
 async function connectGoogleDrive() {
-    if (!googleDriveStorage.isEnabled) {
+    // Check if config is saved first
+    const savedConfig = localStorage.getItem('googleDriveConfig');
+    if (!savedConfig) {
+        showNotification('Please save configuration first (Client ID and API Key)', 'warning');
+        return;
+    }
+    
+    // Re-initialize to ensure config is loaded
+    if (typeof initGoogleDriveStorage === 'function') {
+        initGoogleDriveStorage();
+    }
+    
+    if (!googleDriveStorage || !googleDriveStorage.isEnabled) {
         showNotification('Please save configuration first (Client ID and API Key)', 'warning');
         return;
     }
@@ -4438,7 +4495,12 @@ async function connectGoogleDrive() {
 }
 
 async function testGoogleDriveConnection() {
-    if (!googleDriveStorage.isEnabled) {
+    // Re-initialize to ensure config is loaded
+    if (typeof initGoogleDriveStorage === 'function') {
+        initGoogleDriveStorage();
+    }
+    
+    if (!googleDriveStorage || !googleDriveStorage.isEnabled) {
         showNotification('Google Drive not configured. Please set Client ID and API Key first.', 'warning');
         return;
     }
@@ -4472,11 +4534,16 @@ function updateGoogleDriveStatus() {
     const statusText = document.getElementById('googleDriveStatusText');
     const syncInfo = document.getElementById('googleDriveSyncInfo');
     
-    if (googleDriveStorage.isEnabled && googleDriveStorage.isAuthenticated) {
+    // Re-initialize to get latest status
+    if (typeof initGoogleDriveStorage === 'function') {
+        initGoogleDriveStorage();
+    }
+    
+    if (googleDriveStorage && googleDriveStorage.isEnabled && googleDriveStorage.isAuthenticated) {
         statusText.textContent = 'Connected and Authenticated';
         statusText.style.color = '#27ae60';
         syncInfo.style.display = 'block';
-    } else if (googleDriveStorage.isEnabled) {
+    } else if (googleDriveStorage && googleDriveStorage.isEnabled) {
         statusText.textContent = 'Configured but not authenticated';
         statusText.style.color = '#f39c12';
         syncInfo.style.display = 'none';

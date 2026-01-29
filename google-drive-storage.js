@@ -106,21 +106,44 @@ async function initGoogleAPI() {
 
 // Authenticate with Google Drive
 async function authenticateGoogleDrive() {
-    if (!googleDriveStorage.isEnabled) {
-        throw new Error('Google Drive not configured. Please set Client ID and API Key.');
+    // Re-initialize config from localStorage to ensure we have latest
+    initGoogleDriveStorage();
+    
+    if (!googleDriveStorage.isEnabled || !googleDriveStorage.clientId || !googleDriveStorage.apiKey) {
+        throw new Error('Google Drive not configured. Please set Client ID and API Key in settings.');
     }
     
     try {
         await initGoogleAPI();
         
-        await window.gapi.client.init({
-            apiKey: googleDriveStorage.apiKey,
-            clientId: googleDriveStorage.clientId,
-            discoveryDocs: DISCOVERY_DOCS,
-            scope: SCOPES
-        });
+        // Check if client is already initialized - if so, we may need to re-init with new credentials
+        let needsInit = true;
+        if (window.gapi.client && window.gapi.client.getToken) {
+            try {
+                // Try to get current config to see if it matches
+                const currentApiKey = window.gapi.client.apiKey;
+                if (currentApiKey === googleDriveStorage.apiKey) {
+                    needsInit = false;
+                }
+            } catch (e) {
+                // Client not properly initialized, need to init
+            }
+        }
+        
+        if (needsInit) {
+            await window.gapi.client.init({
+                apiKey: googleDriveStorage.apiKey,
+                clientId: googleDriveStorage.clientId,
+                discoveryDocs: DISCOVERY_DOCS,
+                scope: SCOPES
+            });
+        }
         
         const authInstance = window.gapi.auth2.getAuthInstance();
+        if (!authInstance) {
+            throw new Error('Failed to get auth instance. Please check your Client ID.');
+        }
+        
         const user = authInstance.currentUser.get();
         
         if (!user.isSignedIn()) {
@@ -129,6 +152,10 @@ async function authenticateGoogleDrive() {
         }
         
         const authResponse = user.getAuthResponse();
+        if (!authResponse || !authResponse.access_token) {
+            throw new Error('Failed to get access token. Please try again.');
+        }
+        
         googleDriveStorage.accessToken = authResponse.access_token;
         googleDriveStorage.isAuthenticated = true;
         
