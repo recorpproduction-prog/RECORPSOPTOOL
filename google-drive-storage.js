@@ -62,21 +62,25 @@ function initGoogleDriveStorage() {
         googleDriveStorage.isAuthenticated = false;
     }
     
-    if (googleDriveStorage.isEnabled) {
-        console.log('✅ Google Drive Storage initialized');
-        console.log('Client ID:', googleDriveStorage.clientId ? googleDriveStorage.clientId.substring(0, 20) + '...' : 'Not set');
-        console.log('API Key:', googleDriveStorage.apiKey ? googleDriveStorage.apiKey.substring(0, 20) + '...' : 'Not set');
-        console.log('Folder ID:', googleDriveStorage.folderId || 'Not set');
-        console.log('Authenticated:', googleDriveStorage.isAuthenticated);
-    } else {
-        console.log('⚠️ Google Drive Storage not configured');
+    // Only log once per session to avoid spam
+    if (!googleDriveStorage._initialized) {
+        if (googleDriveStorage.isEnabled) {
+            console.log('✅ Google Drive Storage initialized');
+            console.log('Client ID:', googleDriveStorage.clientId ? googleDriveStorage.clientId.substring(0, 20) + '...' : 'Not set');
+            console.log('API Key:', googleDriveStorage.apiKey ? googleDriveStorage.apiKey.substring(0, 10) + '...' : 'Not set');
+            console.log('Folder ID:', googleDriveStorage.folderId || 'Not set');
+            console.log('Authenticated:', googleDriveStorage.isAuthenticated);
+        } else {
+            console.log('⚠️ Google Drive Storage not configured');
+        }
+        googleDriveStorage._initialized = true;
     }
     
     return googleDriveStorage.isEnabled;
 }
 
 // Save Google Drive configuration
-function saveGoogleDriveConfig(clientId, apiKey, folderId) {
+function saveGoogleDriveConfigToStorage(clientId, apiKey, folderId) {
     googleDriveStorage.clientId = clientId;
     googleDriveStorage.apiKey = apiKey;
     googleDriveStorage.folderId = folderId;
@@ -89,7 +93,9 @@ function saveGoogleDriveConfig(clientId, apiKey, folderId) {
     };
     
     localStorage.setItem('googleDriveConfig', JSON.stringify(config));
-    console.log('✅ Google Drive config saved');
+    console.log('✅ Google Drive config saved to localStorage');
+    console.log('Config saved - Client ID:', clientId ? clientId.substring(0, 20) + '...' : 'empty');
+    console.log('Config saved - API Key:', apiKey ? apiKey.substring(0, 10) + '...' : 'empty');
     return true;
 }
 
@@ -467,7 +473,7 @@ if (typeof window !== 'undefined') {
     window.deleteSopFromGoogleDrive = deleteSopFromGoogleDrive;
     window.authenticateGoogleDrive = authenticateGoogleDrive;
     window.signOutGoogleDrive = signOutGoogleDrive;
-    window.saveGoogleDriveConfig = saveGoogleDriveConfig;
+    window.saveGoogleDriveConfig = saveGoogleDriveConfigToStorage;
     window.useGoogleDrive = useGoogleDrive;
     window.initGoogleDriveStorage = initGoogleDriveStorage;
     window.getSopsFolder = getSopsFolder;

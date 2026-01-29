@@ -243,7 +243,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Load asynchronously without blocking app initialization
         loadAllSopsFromGoogleDrive().then(sops => {
             if (sops && Object.keys(sops).length > 0) {
-                console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from GitHub repository`);
+                console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from Google Drive`);
             } else {
                 console.log('📝 No SOPs in GitHub repository yet');
             }
@@ -4371,8 +4371,8 @@ async function openGoogleDriveSettings() {
     if (!modal) return;
     
     // Initialize Google Drive storage
-    if (typeof initGoogleDriveStorage === 'function') {
-        initGoogleDriveStorage();
+    if (typeof window.initGoogleDriveStorage === 'function') {
+        window.initGoogleDriveStorage();
     }
     
     // Load current config from localStorage
@@ -4442,18 +4442,27 @@ async function saveGoogleDriveConfig() {
         return;
     }
     
+    // Check if storage module function exists (from google-drive-storage.js)
+    // The storage module exports saveGoogleDriveConfigToStorage as window.saveGoogleDriveConfig
     if (typeof window.saveGoogleDriveConfig === 'undefined') {
         showNotification('Google Drive storage module not loaded. Please refresh the page.', 'error');
         return;
     }
     
+    // Make sure we're not calling ourselves (prevent infinite recursion)
+    if (window.saveGoogleDriveConfig === saveGoogleDriveConfig) {
+        showNotification('Configuration error. Please refresh the page.', 'error');
+        return;
+    }
+    
     try {
-        // Call the storage module function
-        const saved = window.saveGoogleDriveConfig(clientId, apiKey, folderId || null);
+        // Call the storage module function (not this function!)
+        const storageSaveFn = window.saveGoogleDriveConfig;
+        const saved = storageSaveFn(clientId, apiKey, folderId || null);
         if (saved) {
             // Re-initialize to load the new config
-            if (typeof initGoogleDriveStorage === 'function') {
-                initGoogleDriveStorage();
+            if (typeof window.initGoogleDriveStorage === 'function') {
+                window.initGoogleDriveStorage();
             }
             showNotification('Google Drive configuration saved successfully!', 'success');
             updateGoogleDriveStatus();
@@ -4585,9 +4594,13 @@ function updateGoogleDriveStatus() {
     
     if (!statusText) return;
     
-    // Re-initialize to get latest status
-    if (typeof initGoogleDriveStorage === 'function') {
-        initGoogleDriveStorage();
+    // Re-initialize to get latest status (only once)
+    if (typeof window.initGoogleDriveStorage === 'function') {
+        try {
+            window.initGoogleDriveStorage();
+        } catch (e) {
+            console.error('Error initializing Google Drive:', e);
+        }
     }
     
     // Use window object to ensure we get the right storage
