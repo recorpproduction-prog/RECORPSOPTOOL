@@ -4411,88 +4411,71 @@ function closeGoogleDriveSettings() {
     if (modal) modal.classList.add('hidden');
 }
 
-async function saveGoogleDriveConfig() {
-    console.log('🔧 saveGoogleDriveConfig() called from app.js');
-    
+async function saveGoogleDriveConfigFromUI() {
+    // Prevent double-clicks / re-entry (avoids recursion)
+    if (saveGoogleDriveConfigFromUI._saving) {
+        return;
+    }
+    saveGoogleDriveConfigFromUI._saving = true;
+
     const clientIdInput = document.getElementById('googleDriveClientId');
     const apiKeyInput = document.getElementById('googleDriveApiKey');
     const folderIdInput = document.getElementById('googleDriveFolderId');
-    
+
     if (!clientIdInput || !apiKeyInput) {
-        console.error('❌ Form inputs not found');
+        saveGoogleDriveConfigFromUI._saving = false;
         showNotification('Configuration form not found', 'error');
         return;
     }
-    
+
     const clientId = clientIdInput.value.trim();
     const apiKey = apiKeyInput.value.trim();
     const folderId = folderIdInput ? folderIdInput.value.trim() : '';
-    
-    console.log('📝 Form values:');
-    console.log('  - Client ID length:', clientId.length);
-    console.log('  - API Key length:', apiKey.length);
-    console.log('  - Folder ID:', folderId || 'empty');
-    
+
     if (!clientId || !apiKey) {
-        console.warn('⚠️ Missing values - Client ID:', !!clientId, 'API Key:', !!apiKey);
+        saveGoogleDriveConfigFromUI._saving = false;
         showNotification('Please enter both Client ID and API Key', 'warning');
         return;
     }
-    
-    // Validate Client ID format
+
     if (!clientId.includes('.apps.googleusercontent.com')) {
-        console.warn('⚠️ Invalid Client ID format');
+        saveGoogleDriveConfigFromUI._saving = false;
         showNotification('Invalid Client ID format. Should end with .apps.googleusercontent.com', 'warning');
         return;
     }
-    
-    // Validate API Key format
+
     if (!apiKey.startsWith('AIza')) {
-        console.warn('⚠️ Invalid API Key format');
+        saveGoogleDriveConfigFromUI._saving = false;
         showNotification('Invalid API Key format. Should start with AIza', 'warning');
         return;
     }
-    
-    // Check if storage module function exists (from google-drive-storage.js)
-    // The storage module exports saveGoogleDriveConfigToStorage as window.saveGoogleDriveConfig
-    if (typeof window.saveGoogleDriveConfig === 'undefined') {
-        console.error('❌ window.saveGoogleDriveConfig is undefined');
-        showNotification('Google Drive storage module not loaded. Please refresh the page.', 'error');
-        return;
-    }
-    
-    console.log('✅ window.saveGoogleDriveConfig exists:', typeof window.saveGoogleDriveConfig);
-    
-    // Make sure we're not calling ourselves (prevent infinite recursion)
-    if (window.saveGoogleDriveConfig === saveGoogleDriveConfig) {
-        console.error('❌ Infinite recursion detected!');
-        showNotification('Configuration error. Please refresh the page.', 'error');
-        return;
-    }
-    
+
     try {
-        console.log('💾 Calling storage module save function...');
-        // Call the storage module function (not this function!)
-        const storageSaveFn = window.saveGoogleDriveConfig;
-        const saved = storageSaveFn(clientId, apiKey, folderId || null);
-        console.log('💾 Save function returned:', saved);
-        
-        if (saved) {
-            // Re-initialize to load the new config
-            console.log('🔄 Re-initializing storage...');
-            if (typeof window.initGoogleDriveStorage === 'function') {
-                window.initGoogleDriveStorage();
-            }
-            showNotification('Google Drive configuration saved successfully!', 'success');
-            updateGoogleDriveStatus();
-        } else {
-            console.error('❌ Save function returned false');
-            showNotification('Failed to save configuration', 'error');
+        const config = {
+            clientId: clientId,
+            apiKey: apiKey,
+            folderId: folderId || null
+        };
+        localStorage.setItem('googleDriveConfig', JSON.stringify(config));
+
+        if (window.googleDriveStorage) {
+            window.googleDriveStorage.clientId = clientId;
+            window.googleDriveStorage.apiKey = apiKey;
+            window.googleDriveStorage.folderId = folderId || null;
+            window.googleDriveStorage.isEnabled = true;
         }
+
+        if (typeof window.initGoogleDriveStorage === 'function') {
+            window.initGoogleDriveStorage();
+        }
+
+        showNotification('Google Drive configuration saved successfully!', 'success');
+        updateGoogleDriveStatus();
     } catch (e) {
-        console.error('❌ Exception during save:', e);
+        console.error('Error saving Google Drive config:', e);
         showNotification('Error saving configuration: ' + e.message, 'error');
-        console.error('Save config error:', e);
+    } finally {
+        saveGoogleDriveConfigFromUI._saving = false;
     }
 }
 
@@ -4543,18 +4526,19 @@ async function connectGoogleDrive() {
     
     // Check if enabled after initialization
     if (!storage || !storage.isEnabled) {
-        // Try to manually enable if we have config
+        // Try to manually apply config and re-initialize
         if (config.clientId && config.apiKey) {
-            if (typeof window.saveGoogleDriveConfig === 'function') {
-                window.saveGoogleDriveConfig(config.clientId, config.apiKey, config.folderId || null);
-                // Re-initialize again
+            try {
+                localStorage.setItem('googleDriveConfig', JSON.stringify(config));
                 if (typeof initGoogleDriveStorage === 'function') {
                     initGoogleDriveStorage();
                 }
                 await new Promise(resolve => setTimeout(resolve, 200));
+            } catch (e) {
+                console.warn('Could not re-apply config:', e);
             }
         }
-        
+
         // Final check
         if (!storage.isEnabled) {
             console.error('Storage not enabled after initialization. Config:', config);
@@ -5175,7 +5159,7 @@ window.closeGitHubSettings = closeGitHubSettings;
 window.saveGitHubToken = saveGitHubToken;
 window.openGoogleDriveSettings = openGoogleDriveSettings;
 window.closeGoogleDriveSettings = closeGoogleDriveSettings;
-window.saveGoogleDriveConfig = saveGoogleDriveConfig;
+window.saveGoogleDriveConfigFromUI = saveGoogleDriveConfigFromUI; // Renamed to avoid conflict with storage module
 window.connectGoogleDrive = connectGoogleDrive;
 window.testGoogleDriveConnection = testGoogleDriveConnection;
 window.disconnectGoogleDrive = disconnectGoogleDrive;

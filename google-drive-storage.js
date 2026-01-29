@@ -80,29 +80,38 @@ function initGoogleDriveStorage() {
 }
 
 // Save Google Drive configuration
+// IMPORTANT: This function must NOT call window.saveGoogleDriveConfig to avoid recursion
 function saveGoogleDriveConfigToStorage(clientId, apiKey, folderId) {
-    console.log('💾 saveGoogleDriveConfigToStorage called with:');
-    console.log('  - clientId:', clientId ? clientId.substring(0, 30) + '...' : 'EMPTY');
-    console.log('  - apiKey:', apiKey ? apiKey.substring(0, 15) + '...' : 'EMPTY');
-    console.log('  - folderId:', folderId || 'null');
-    
-    if (!clientId || !apiKey) {
-        console.error('❌ Cannot save: clientId or apiKey is empty');
+    // Prevent recursion - check if we're being called recursively
+    if (saveGoogleDriveConfigToStorage._saving) {
+        console.error('❌ RECURSION DETECTED in saveGoogleDriveConfigToStorage!');
         return false;
     }
     
-    googleDriveStorage.clientId = clientId;
-    googleDriveStorage.apiKey = apiKey;
-    googleDriveStorage.folderId = folderId || null;
-    googleDriveStorage.isEnabled = !!(clientId && apiKey);
-    
-    const config = {
-        clientId: clientId,
-        apiKey: apiKey,
-        folderId: folderId || null
-    };
+    saveGoogleDriveConfigToStorage._saving = true;
     
     try {
+        console.log('💾 saveGoogleDriveConfigToStorage called with:');
+        console.log('  - clientId:', clientId ? clientId.substring(0, 30) + '...' : 'EMPTY');
+        console.log('  - apiKey:', apiKey ? apiKey.substring(0, 15) + '...' : 'EMPTY');
+        console.log('  - folderId:', folderId || 'null');
+        
+        if (!clientId || !apiKey) {
+            console.error('❌ Cannot save: clientId or apiKey is empty');
+            return false;
+        }
+        
+        googleDriveStorage.clientId = clientId;
+        googleDriveStorage.apiKey = apiKey;
+        googleDriveStorage.folderId = folderId || null;
+        googleDriveStorage.isEnabled = !!(clientId && apiKey);
+        
+        const config = {
+            clientId: clientId,
+            apiKey: apiKey,
+            folderId: folderId || null
+        };
+        
         localStorage.setItem('googleDriveConfig', JSON.stringify(config));
         console.log('✅ Google Drive config saved to localStorage');
         console.log('✅ Config saved - Client ID length:', clientId.length);
@@ -122,6 +131,8 @@ function saveGoogleDriveConfigToStorage(clientId, apiKey, folderId) {
     } catch (e) {
         console.error('❌ Error saving to localStorage:', e);
         return false;
+    } finally {
+        saveGoogleDriveConfigToStorage._saving = false;
     }
 }
 
