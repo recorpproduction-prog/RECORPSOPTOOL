@@ -4412,11 +4412,14 @@ function closeGoogleDriveSettings() {
 }
 
 async function saveGoogleDriveConfig() {
+    console.log('🔧 saveGoogleDriveConfig() called from app.js');
+    
     const clientIdInput = document.getElementById('googleDriveClientId');
     const apiKeyInput = document.getElementById('googleDriveApiKey');
     const folderIdInput = document.getElementById('googleDriveFolderId');
     
     if (!clientIdInput || !apiKeyInput) {
+        console.error('❌ Form inputs not found');
         showNotification('Configuration form not found', 'error');
         return;
     }
@@ -4425,19 +4428,27 @@ async function saveGoogleDriveConfig() {
     const apiKey = apiKeyInput.value.trim();
     const folderId = folderIdInput ? folderIdInput.value.trim() : '';
     
+    console.log('📝 Form values:');
+    console.log('  - Client ID length:', clientId.length);
+    console.log('  - API Key length:', apiKey.length);
+    console.log('  - Folder ID:', folderId || 'empty');
+    
     if (!clientId || !apiKey) {
+        console.warn('⚠️ Missing values - Client ID:', !!clientId, 'API Key:', !!apiKey);
         showNotification('Please enter both Client ID and API Key', 'warning');
         return;
     }
     
     // Validate Client ID format
     if (!clientId.includes('.apps.googleusercontent.com')) {
+        console.warn('⚠️ Invalid Client ID format');
         showNotification('Invalid Client ID format. Should end with .apps.googleusercontent.com', 'warning');
         return;
     }
     
     // Validate API Key format
     if (!apiKey.startsWith('AIza')) {
+        console.warn('⚠️ Invalid API Key format');
         showNotification('Invalid API Key format. Should start with AIza', 'warning');
         return;
     }
@@ -4445,31 +4456,41 @@ async function saveGoogleDriveConfig() {
     // Check if storage module function exists (from google-drive-storage.js)
     // The storage module exports saveGoogleDriveConfigToStorage as window.saveGoogleDriveConfig
     if (typeof window.saveGoogleDriveConfig === 'undefined') {
+        console.error('❌ window.saveGoogleDriveConfig is undefined');
         showNotification('Google Drive storage module not loaded. Please refresh the page.', 'error');
         return;
     }
     
+    console.log('✅ window.saveGoogleDriveConfig exists:', typeof window.saveGoogleDriveConfig);
+    
     // Make sure we're not calling ourselves (prevent infinite recursion)
     if (window.saveGoogleDriveConfig === saveGoogleDriveConfig) {
+        console.error('❌ Infinite recursion detected!');
         showNotification('Configuration error. Please refresh the page.', 'error');
         return;
     }
     
     try {
+        console.log('💾 Calling storage module save function...');
         // Call the storage module function (not this function!)
         const storageSaveFn = window.saveGoogleDriveConfig;
         const saved = storageSaveFn(clientId, apiKey, folderId || null);
+        console.log('💾 Save function returned:', saved);
+        
         if (saved) {
             // Re-initialize to load the new config
+            console.log('🔄 Re-initializing storage...');
             if (typeof window.initGoogleDriveStorage === 'function') {
                 window.initGoogleDriveStorage();
             }
             showNotification('Google Drive configuration saved successfully!', 'success');
             updateGoogleDriveStatus();
         } else {
+            console.error('❌ Save function returned false');
             showNotification('Failed to save configuration', 'error');
         }
     } catch (e) {
+        console.error('❌ Exception during save:', e);
         showNotification('Error saving configuration: ' + e.message, 'error');
         console.error('Save config error:', e);
     }

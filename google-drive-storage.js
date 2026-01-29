@@ -81,22 +81,48 @@ function initGoogleDriveStorage() {
 
 // Save Google Drive configuration
 function saveGoogleDriveConfigToStorage(clientId, apiKey, folderId) {
+    console.log('💾 saveGoogleDriveConfigToStorage called with:');
+    console.log('  - clientId:', clientId ? clientId.substring(0, 30) + '...' : 'EMPTY');
+    console.log('  - apiKey:', apiKey ? apiKey.substring(0, 15) + '...' : 'EMPTY');
+    console.log('  - folderId:', folderId || 'null');
+    
+    if (!clientId || !apiKey) {
+        console.error('❌ Cannot save: clientId or apiKey is empty');
+        return false;
+    }
+    
     googleDriveStorage.clientId = clientId;
     googleDriveStorage.apiKey = apiKey;
-    googleDriveStorage.folderId = folderId;
+    googleDriveStorage.folderId = folderId || null;
     googleDriveStorage.isEnabled = !!(clientId && apiKey);
     
     const config = {
         clientId: clientId,
         apiKey: apiKey,
-        folderId: folderId
+        folderId: folderId || null
     };
     
-    localStorage.setItem('googleDriveConfig', JSON.stringify(config));
-    console.log('✅ Google Drive config saved to localStorage');
-    console.log('Config saved - Client ID:', clientId ? clientId.substring(0, 20) + '...' : 'empty');
-    console.log('Config saved - API Key:', apiKey ? apiKey.substring(0, 10) + '...' : 'empty');
-    return true;
+    try {
+        localStorage.setItem('googleDriveConfig', JSON.stringify(config));
+        console.log('✅ Google Drive config saved to localStorage');
+        console.log('✅ Config saved - Client ID length:', clientId.length);
+        console.log('✅ Config saved - API Key length:', apiKey.length);
+        
+        // Verify it was saved
+        const verify = localStorage.getItem('googleDriveConfig');
+        if (verify) {
+            const parsed = JSON.parse(verify);
+            console.log('✅ Verification: Config in localStorage - Client ID present:', !!parsed.clientId);
+            console.log('✅ Verification: Config in localStorage - API Key present:', !!parsed.apiKey);
+        } else {
+            console.error('❌ ERROR: Config not found in localStorage after save!');
+        }
+        
+        return true;
+    } catch (e) {
+        console.error('❌ Error saving to localStorage:', e);
+        return false;
+    }
 }
 
 // Initialize Google API Client
@@ -478,11 +504,19 @@ if (typeof window !== 'undefined') {
     window.initGoogleDriveStorage = initGoogleDriveStorage;
     window.getSopsFolder = getSopsFolder;
     
-    // Auto-initialize when DOM is ready
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initGoogleDriveStorage);
-    } else {
-        initGoogleDriveStorage();
+    // Auto-initialize when DOM is ready (only once)
+    if (!googleDriveStorage._autoInitDone) {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                if (!googleDriveStorage._autoInitDone) {
+                    initGoogleDriveStorage();
+                    googleDriveStorage._autoInitDone = true;
+                }
+            });
+        } else {
+            initGoogleDriveStorage();
+            googleDriveStorage._autoInitDone = true;
+        }
     }
 }
 
