@@ -1,16 +1,12 @@
-# SOP Shared Backend – for Google Cloud Run
-# Use Node 18 (matches package.json engines)
+# Build from repo root – backend lives in sop-shared-backend/
 FROM node:18-slim
 
 WORKDIR /app
 
-# Copy package files first so install is cached
-COPY package*.json ./
+COPY sop-shared-backend/package.json ./
 RUN npm install --production
 
-# Copy app code
-COPY index.js ./
+COPY sop-shared-backend/index.js ./
 
-# Cloud Run sets PORT (default 8080)
 EXPOSE 8080
 CMD ["node", "index.js"]
