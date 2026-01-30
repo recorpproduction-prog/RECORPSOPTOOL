@@ -172,6 +172,66 @@ async function initGoogleAPI() {
     });
 }
 
+// Wait for GIS script to be available; load it dynamically if missing
+function waitForGIS(timeoutMs) {
+    timeoutMs = timeoutMs || 15000;
+    return new Promise((resolve, reject) => {
+        const check = () => {
+            if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2 && typeof google.accounts.oauth2.initTokenClient === 'function') {
+                resolve();
+                return true;
+            }
+            return false;
+        };
+        if (check()) return;
+        // If GIS not in page, load it now
+        if (!document.querySelector('script[src*="accounts.google.com/gsi/client"]')) {
+            const s = document.createElement('script');
+            s.src = 'https://accounts.google.com/gsi/client';
+            s.async = true;
+            s.defer = true;
+            let resolved = false;
+            const done = () => {
+                if (resolved) return;
+                resolved = true;
+                resolve();
+            };
+            const fail = () => {
+                if (resolved) return;
+                resolved = true;
+                reject(new Error('Google Identity Services script did not load in time. Check your connection and refresh the page.'));
+            };
+            s.onload = () => {
+                const id = setInterval(() => {
+                    if (check()) {
+                        clearInterval(id);
+                        done();
+                    }
+                }, 50);
+                setTimeout(() => {
+                    clearInterval(id);
+                    if (!resolved) fail();
+                }, timeoutMs);
+            };
+            s.onerror = () => reject(new Error('Failed to load Google Identity Services script. Check your connection.'));
+            document.head.appendChild(s);
+            return;
+        }
+        const start = Date.now();
+        const id = setInterval(() => {
+            if (check()) {
+                clearInterval(id);
+                resolve();
+                return;
+            }
+            if (Date.now() - start >= timeoutMs) {
+                clearInterval(id);
+                reject(new Error('Google Identity Services (GIS) script did not load in time. Check your connection and refresh the page.'));
+            }
+        }, 200);
+    });
+}
+
 function getOrCreateTokenClient() {
     if (gisTokenClient) return gisTokenClient;
     if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2 || !google.accounts.oauth2.initTokenClient) {
@@ -198,6 +258,7 @@ async function authenticateGoogleDrive() {
     
     try {
         await initGoogleAPI();
+        await waitForGIS();
         const tokenClient = getOrCreateTokenClient();
         
         return new Promise((resolve, reject) => {
