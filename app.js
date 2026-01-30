@@ -4403,6 +4403,10 @@ async function openGoogleDriveSettings() {
     }
     
     updateGoogleDriveStatus();
+    const originHint = document.getElementById('googleDriveOriginHint');
+    if (originHint && typeof window.location !== 'undefined') {
+        originHint.textContent = window.location.origin;
+    }
     modal.classList.remove('hidden');
 }
 
@@ -4412,7 +4416,7 @@ function closeGoogleDriveSettings() {
 }
 
 async function saveGoogleDriveConfigFromUI() {
-    // Prevent double-clicks / re-entry (avoids recursion)
+    // Save path v2: writes directly to localStorage (no window.saveGoogleDriveConfig)
     if (saveGoogleDriveConfigFromUI._saving) {
         return;
     }
@@ -4552,7 +4556,12 @@ async function connectGoogleDrive() {
         showNotification('Successfully connected to Google Drive!', 'success');
         updateGoogleDriveStatus();
     } catch (e) {
-        showNotification('Error connecting to Google Drive: ' + e.message, 'error');
+        const msg = e && (e.details || e.message || (typeof e === 'string' ? e : JSON.stringify(e)));
+        if (msg && (msg.includes('Not a valid origin') || msg.includes('idpiframe_initialization_failed'))) {
+            showNotification('Add this site\'s URL to Google Cloud Console → APIs & Services → Credentials → your OAuth client → Authorized JavaScript origins', 'error');
+        } else {
+            showNotification('Error connecting to Google Drive: ' + (e && e.message ? e.message : msg), 'error');
+        }
         console.error('Google Drive connection error:', e);
     }
 }
@@ -4578,7 +4587,8 @@ async function testGoogleDriveConnection() {
         showNotification('Google Drive connection successful! Folder ID: ' + folderId, 'success');
         updateGoogleDriveStatus();
     } catch (e) {
-        showNotification('Connection test failed: ' + e.message, 'error');
+        const msg = e && (e.details || e.message || (typeof e === 'string' ? e : (e.error ? String(e.error) + (e.details ? ': ' + e.details : '') : JSON.stringify(e))));
+        showNotification('Connection test failed: ' + (msg || 'Unknown error'), 'error');
         console.error('Google Drive test error:', e);
     }
 }

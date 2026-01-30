@@ -226,9 +226,10 @@ async function authenticateGoogleDrive() {
         console.log('✅ Google Drive authenticated');
         return true;
     } catch (error) {
-        console.error('Error authenticating with Google Drive:', error);
+        const msg = (error && (error.details || error.message || (typeof error.error === 'string' ? error.error : null))) || (typeof error === 'string' ? error : JSON.stringify(error));
+        console.error('Error authenticating with Google Drive:', msg, error);
         googleDriveStorage.isAuthenticated = false;
-        throw error;
+        throw new Error(msg);
     }
 }
 
