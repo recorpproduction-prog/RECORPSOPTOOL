@@ -1,12 +1,12 @@
-# Cloud Run backend – only needs cloud-run-backend.js at repo root (no folders)
+# Build from repo root – uses existing sop-shared-backend folder only
 FROM node:18-slim
 
 WORKDIR /app
 
-RUN echo '{"name":"sop-shared-backend","version":"1.0.0","main":"cloud-run-backend.js","engines":{"node":">=18"},"dependencies":{"googleapis":"^128.0.0"}}' > package.json
+COPY sop-shared-backend/package.json ./
 RUN npm install --production
 
-COPY cloud-run-backend.js ./
+COPY sop-shared-backend/index.js ./
 
 EXPOSE 8080
-CMD ["node", "cloud-run-backend.js"]
+CMD ["node", "index.js"]
