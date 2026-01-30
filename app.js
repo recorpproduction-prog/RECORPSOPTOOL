@@ -1425,13 +1425,15 @@ async function showLoadSection() {
             try {
                 const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
+                // Merge in localStorage SOPs (in case some were saved before Drive was connected)
+                const local = JSON.parse(localStorage.getItem('savedSops') || '{}');
+                Object.keys(local).forEach(key => { if (local[key] && local[key].meta && !savedSops[key]) savedSops[key] = local[key]; });
             } catch (error) {
                 console.error('❌ Error loading from shared backend:', error);
                 list.innerHTML = '<p>Error loading SOPs: ' + escapeHtml(error.message) + '</p><p>Check Cloud Run env vars (SOP_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_JSON) and that the Drive folder is shared with the service account.</p>';
                 return;
             }
         } else {
-            // Fallback to localStorage if Google Drive not available
             savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
             if (Object.keys(savedSops).length === 0) {
                 list.innerHTML = '<p>Google Drive storage not configured. Please set up Google Drive in settings.</p>';
@@ -2522,12 +2524,17 @@ async function refreshRegister() {
             try {
                 const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
+                // Merge in localStorage SOPs (in case some were saved before Drive was connected)
+                const local = JSON.parse(localStorage.getItem('savedSops') || '{}');
+                Object.keys(local).forEach(key => { if (local[key] && local[key].meta && !savedSops[key]) savedSops[key] = local[key]; });
             } catch (error) {
                 console.error('❌ Error loading from shared backend:', error);
                 renderRegisterTable([]);
                 showNotification('Could not load SOPs: ' + (error.message || 'Backend error. Check Cloud Run env vars: SOP_FOLDER_ID and GOOGLE_SERVICE_ACCOUNT_JSON.'), 'error');
                 return;
             }
+        } else {
+            savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
         }
         allSops = [];
         
