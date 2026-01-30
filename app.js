@@ -270,6 +270,24 @@ async function deleteSopFromCloud(sopId) {
     return false;
 }
 
+/** Load SOPs from cloud + localStorage merge. Single source of truth for all data loading. */
+async function loadAllSopsMerged() {
+    let savedSops = {};
+    if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
+        try {
+            const loaded = await loadAllSopsFromCloud();
+            savedSops = loaded || {};
+        } catch (e) {
+            console.warn('Cloud load failed, using localStorage:', e.message);
+        }
+        const local = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        Object.keys(local).forEach(key => { if (local[key] && local[key].meta && !savedSops[key]) savedSops[key] = local[key]; });
+    } else {
+        savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+    }
+    return savedSops;
+}
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', async function() {
     initializeEventListeners();
@@ -289,6 +307,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             console.warn('⚠️ Shared backend load failed:', error.message);
             showNotification('SOPs not loading: ' + (error.message || 'Check Cloud Run env vars (SOP_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_JSON) and Drive folder share.'), 'error');
         });
+    }
+    
+    // Hide Drive/cloud settings when using shared access (backend URL) - staff should not access it
+    const driveBtn = document.getElementById('googleDriveSettingsBtn');
+    if (driveBtn && typeof useSharedAccess === 'function' && useSharedAccess()) {
+        driveBtn.style.display = 'none';
     }
     
     // Load last draft SOP from storage on page load (only on initial page load, not when switching tabs)
@@ -445,18 +469,7 @@ async function autoGenerateSopId(forceGenerate = false) {
 // Get next sequence number for a department/month combination
 async function getNextSequenceNumber(deptCode, year, month) {
     try {
-        // LOAD FROM GITHUB ONLY
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('Error loading from GitHub for sequence:', error);
-                savedSops = {};
-            }
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         const prefix = `${deptCode}-${year}-${month}`;
         
         let maxSequence = 0;
@@ -1415,30 +1428,20 @@ async function showLoadSection() {
     
     if (!section || !list) return;
     
-    list.innerHTML = '<p>Loading SOPs from Google Drive...</p>';
+    list.innerHTML = '<p>Loading SOPs...</p>';
     section.classList.remove('hidden');
     
     try {
-        // LOAD FROM GOOGLE DRIVE
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-                // Merge in localStorage SOPs (in case some were saved before Drive was connected)
-                const local = JSON.parse(localStorage.getItem('savedSops') || '{}');
-                Object.keys(local).forEach(key => { if (local[key] && local[key].meta && !savedSops[key]) savedSops[key] = local[key]; });
-            } catch (error) {
-                console.error('❌ Error loading from shared backend:', error);
-                list.innerHTML = '<p>Error loading SOPs: ' + escapeHtml(error.message) + '</p><p>Check Cloud Run env vars (SOP_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_JSON) and that the Drive folder is shared with the service account.</p>';
-                return;
-            }
-        } else {
-            savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
-            if (Object.keys(savedSops).length === 0) {
-                list.innerHTML = '<p>Google Drive storage not configured. Please set up Google Drive in settings.</p>';
-                return;
-            }
+        let savedSops;
+        try {
+            savedSops = await loadAllSopsMerged();
+        } catch (error) {
+            list.innerHTML = '<p>Error loading SOPs: ' + escapeHtml(error.message) + '</p>';
+            return;
+        }
+        if (Object.keys(savedSops).length === 0 && !useCloudSops()) {
+            list.innerHTML = '<p>No SOPs saved yet. Create and save an SOP first.</p>';
+            return;
         }
         
         list.innerHTML = '';
@@ -1529,22 +1532,7 @@ async function downloadExport(index) {
         const exports = JSON.parse(localStorage.getItem('sopExports') || '[]');
         if (index >= 0 && index < exports.length) {
             const exportItem = exports[index];
-            // Load full data from GitHub since we only store metadata in exports
-            let savedSops = {};
-            if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-                try {
-                    const loaded = await loadAllSopsFromCloud();
-                    savedSops = loaded || {};
-                } catch (error) {
-                    console.error('❌ Error loading from GitHub:', error);
-                    showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
-                    return;
-                }
-            } else {
-                showNotification('GitHub storage not available', 'error');
-                return;
-            }
-            
+            const savedSops = await loadAllSopsMerged();
             const sop = savedSops[exportItem.sopId];
             if (sop) {
                 const jsonStr = JSON.stringify(sop, null, 2);
@@ -1570,22 +1558,7 @@ async function loadFromExport(index) {
         const exports = JSON.parse(localStorage.getItem('sopExports') || '[]');
         if (index >= 0 && index < exports.length) {
             const exportItem = exports[index];
-            // Load full data from GitHub since we only store metadata in exports
-            let savedSops = {};
-            if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-                try {
-                    const loaded = await loadAllSopsFromCloud();
-                    savedSops = loaded || {};
-                } catch (error) {
-                    console.error('❌ Error loading from GitHub:', error);
-                    showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
-                    return;
-                }
-            } else {
-                showNotification('GitHub storage not available', 'error');
-                return;
-            }
-            
+            const savedSops = await loadAllSopsMerged();
             const sop = savedSops[exportItem.sopId];
             if (sop) {
                 const sopData = { ...sop };
@@ -1634,22 +1607,7 @@ async function downloadAllExports() {
             return;
         }
         
-        // Load from GitHub
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                showNotification('Error loading SOPs from GitHub: ' + error.message, 'error');
-                return;
-            }
-        } else {
-            showNotification('GitHub storage not available', 'error');
-            return;
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         exports.forEach((exportItem, index) => {
             setTimeout(() => {
                 const sop = savedSops[exportItem.sopId];
@@ -2519,22 +2477,13 @@ let filteredSops = [];
 async function refreshRegister() {
     try {
         // LOAD FROM GITHUB ONLY
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-                // Merge in localStorage SOPs (in case some were saved before Drive was connected)
-                const local = JSON.parse(localStorage.getItem('savedSops') || '{}');
-                Object.keys(local).forEach(key => { if (local[key] && local[key].meta && !savedSops[key]) savedSops[key] = local[key]; });
-            } catch (error) {
-                console.error('❌ Error loading from shared backend:', error);
-                renderRegisterTable([]);
-                showNotification('Could not load SOPs: ' + (error.message || 'Backend error. Check Cloud Run env vars: SOP_FOLDER_ID and GOOGLE_SERVICE_ACCOUNT_JSON.'), 'error');
-                return;
-            }
-        } else {
-            savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        let savedSops;
+        try {
+            savedSops = await loadAllSopsMerged();
+        } catch (error) {
+            renderRegisterTable([]);
+            showNotification('Could not load SOPs: ' + (error.message || 'Check backend configuration.'), 'error');
+            return;
         }
         allSops = [];
         
@@ -2651,22 +2600,7 @@ function renderRegisterTable(sops) {
 
 async function loadSopFromRegister(key) {
     try {
-        // LOAD FROM GITHUB ONLY - NO LOCALSTORAGE
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
-                return;
-            }
-        } else {
-            showNotification('GitHub storage not available', 'error');
-            return;
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         const sop = savedSops[key];
         
         if (sop) {
@@ -2688,35 +2622,7 @@ async function loadSopFromRegister(key) {
 
 async function exportSopPdfFromRegister(key) {
     try {
-        // LOAD FROM GITHUB FIRST, THEN LOCALSTORAGE FALLBACK
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                console.log('📝 Falling back to localStorage...');
-                // FALLBACK: Load from localStorage
-                try {
-                    savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
-                } catch (e) {
-                    console.error('❌ Error loading from localStorage:', e);
-                    showNotification('Error loading SOP: ' + e.message, 'error');
-                    return;
-                }
-            }
-        } else {
-            // No GitHub configured - use localStorage
-            try {
-                savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
-            } catch (e) {
-                console.error('❌ Error loading from localStorage:', e);
-                showNotification('Error loading SOP: ' + e.message, 'error');
-                return;
-            }
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         const sop = savedSops[key];
         
         if (!sop) {
@@ -3228,19 +3134,7 @@ let currentReviewSopKey = null;
 
 async function refreshReviewList() {
     try {
-        // LOAD FROM GITHUB ONLY - NO LOCALSTORAGE
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                savedSops = {};
-            }
-        } else {
-            savedSops = {};
-        }
+        const savedSops = await loadAllSopsMerged();
         
         reviewSops = [];
         
@@ -3475,22 +3369,7 @@ async function approveSopInline(sopKey) {
     }
     
     try {
-        // LOAD FROM GITHUB ONLY
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
-                return;
-            }
-        } else {
-            showNotification('GitHub storage not available', 'error');
-            return;
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         const sop = savedSops[sopKey];
         
         if (!sop) {
@@ -3505,7 +3384,6 @@ async function approveSopInline(sopKey) {
         sop.meta.reviewDate = reviewDate;
         sop.reviewedAt = new Date().toISOString();
         
-        // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
         if (typeof saveSopToCloud === 'function' && useCloudSops()) {
             try {
                 await saveSopToCloud(sop);
@@ -3606,22 +3484,7 @@ async function rejectSopInline(sopKey) {
     }
     
     try {
-        // LOAD FROM GITHUB ONLY
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
-                return;
-            }
-        } else {
-            showNotification('GitHub storage not available', 'error');
-            return;
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         const sop = savedSops[sopKey];
         
         if (!sop) {
@@ -3636,11 +3499,10 @@ async function rejectSopInline(sopKey) {
         sop.meta.reviewDate = reviewDate;
         sop.reviewedAt = new Date().toISOString();
         
-        // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
         if (typeof saveSopToCloud === 'function' && useCloudSops()) {
             try {
                 await saveSopToCloud(sop);
-                console.log('✅ SOP rejected and saved to GitHub');
+                console.log('✅ SOP rejected and saved');
                 showNotification('SOP returned to Draft status. Author can make changes based on your comments.', 'success');
                 await refreshReviewList();
             } catch (error) {
@@ -3658,22 +3520,7 @@ async function rejectSopInline(sopKey) {
 
 async function generatePdfFromReviewKey(sopKey) {
     try {
-        // LOAD FROM GITHUB ONLY
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
-                return;
-            }
-        } else {
-            showNotification('GitHub storage not available', 'error');
-            return;
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         const sop = savedSops[sopKey];
         
         if (!sop) {
@@ -3718,35 +3565,7 @@ function downloadPdfFromReview(sopKey) {
 
 async function viewSopForReview(sopKey) {
     try {
-        // LOAD FROM GITHUB FIRST, THEN LOCALSTORAGE FALLBACK
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                console.log('📝 Falling back to localStorage...');
-                // FALLBACK: Load from localStorage
-                try {
-                    savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
-                } catch (e) {
-                    console.error('❌ Error loading from localStorage:', e);
-                    showNotification('Error loading SOP: ' + e.message, 'error');
-                    return;
-                }
-            }
-        } else {
-            // No GitHub configured - use localStorage
-            try {
-                savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
-            } catch (e) {
-                console.error('❌ Error loading from localStorage:', e);
-                showNotification('Error loading SOP: ' + e.message, 'error');
-                return;
-            }
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         const sop = savedSops[sopKey];
         
         if (!sop) {
@@ -3905,22 +3724,7 @@ async function approveSopFromReviewView() {
     }
     
     try {
-        // LOAD FROM GITHUB ONLY
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                showNotification('Error loading SOP from GitHub: ' + error.message, 'error');
-                return;
-            }
-        } else {
-            showNotification('GitHub storage not available', 'error');
-            return;
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         const sop = savedSops[currentReviewSopKey];
         
         if (!sop) {
@@ -4034,18 +3838,7 @@ let sopTasks = [];
 
 async function refreshProgressTracker() {
     try {
-        // LOAD FROM GITHUB ONLY
-        let savedSops = {};
-        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-            try {
-                const loaded = await loadAllSopsFromCloud();
-                savedSops = loaded || {};
-            } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                savedSops = {};
-            }
-        }
-        
+        const savedSops = await loadAllSopsMerged();
         const progressData = calculateMonthlyProgress(savedSops);
         renderProgressTracker(progressData);
     } catch (e) {
