@@ -20,14 +20,17 @@
         if (!base) return null;
         try {
             const res = await fetch(base + '/sops', { method: 'GET', headers: { Accept: 'application/json' } });
-            if (!res.ok) throw new Error(res.statusText || 'Failed to load SOPs');
-            const data = await res.json();
+            const data = res.ok ? await res.json() : (await res.text().then(t => { try { return JSON.parse(t); } catch (_) { return {}; } }));
+            if (!res.ok) {
+                const msg = (data && data.error) ? data.error : (res.statusText || 'Failed to load SOPs');
+                throw new Error(msg);
+            }
             const sops = data.sops || data;
             if (typeof sops === 'object' && !Array.isArray(sops)) return sops;
             return {};
         } catch (e) {
             console.warn('Shared SOP API load failed:', e.message);
-            return null;
+            throw e;
         }
     }
 

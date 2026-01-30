@@ -277,18 +277,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Preload logo immediately
     preloadLogo();
     
-    // Load SOPs from GitHub on startup - NON-BLOCKING (don't break app if GitHub fails)
+    // Load SOPs from shared backend on startup - NON-BLOCKING (don't break app if backend fails)
     if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
         loadAllSopsFromCloud().then(sops => {
             if (sops && Object.keys(sops).length > 0) {
-                console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from Google Drive`);
+                console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from shared backend`);
             } else {
-                console.log('📝 No SOPs in GitHub repository yet');
+                console.log('📝 No SOPs in shared storage yet');
             }
         }).catch(error => {
-            console.warn('⚠️ GitHub load failed (app will still work):', error.message);
-            // Don't show error notification - just log it
-            // App will work without GitHub
+            console.warn('⚠️ Shared backend load failed:', error.message);
+            showNotification('SOPs not loading: ' + (error.message || 'Check Cloud Run env vars (SOP_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_JSON) and Drive folder share.'), 'error');
         });
     }
     
@@ -1427,8 +1426,8 @@ async function showLoadSection() {
                 const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
-                console.error('❌ Error loading from Google Drive:', error);
-                list.innerHTML = '<p>Error loading SOPs from Google Drive: ' + error.message + '</p>';
+                console.error('❌ Error loading from shared backend:', error);
+                list.innerHTML = '<p>Error loading SOPs: ' + escapeHtml(error.message) + '</p><p>Check Cloud Run env vars (SOP_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_JSON) and that the Drive folder is shared with the service account.</p>';
                 return;
             }
         } else {
@@ -2524,8 +2523,10 @@ async function refreshRegister() {
                 const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
-                console.error('❌ Error loading from GitHub:', error);
-                savedSops = {};
+                console.error('❌ Error loading from shared backend:', error);
+                renderRegisterTable([]);
+                showNotification('Could not load SOPs: ' + (error.message || 'Backend error. Check Cloud Run env vars: SOP_FOLDER_ID and GOOGLE_SERVICE_ACCOUNT_JSON.'), 'error');
+                return;
             }
         }
         allSops = [];
