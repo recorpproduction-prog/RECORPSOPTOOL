@@ -1,9 +1,10 @@
-# Build from repo root – backend lives in sop-shared-backend/
+# Build from repo root – only needs sop-shared-backend/index.js (package.json created here)
 FROM node:18-slim
 
 WORKDIR /app
 
-COPY sop-shared-backend/package.json ./
+# Create package.json so we never depend on it being in the repo
+RUN echo '{"name":"sop-shared-backend","version":"1.0.0","main":"index.js","engines":{"node":">=18"},"dependencies":{"googleapis":"^128.0.0"}}' > package.json
 RUN npm install --production
 
 COPY sop-shared-backend/index.js ./
