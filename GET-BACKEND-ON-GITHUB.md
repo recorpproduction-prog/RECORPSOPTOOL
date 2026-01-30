@@ -28,8 +28,11 @@ If your SOP app folder is already on GitHub and **sop-shared-backend** is inside
    - In **"Name your file..."** type exactly: **sop-shared-backend/index.js**
    - Open **index.js** from your **sop-shared-backend** folder in Notepad, **Ctrl+A** then **Ctrl+C**, paste into the text box on GitHub.
    - Click **Commit changes**.
-4. Check: In your repo you should see a folder **sop-shared-backend** with **package.json** and **index.js** inside it.
-5. Then go to **STEP-5-CREATE-SERVICE-FULL.md** and use **Continuously deploy from a repository** with this repo and directory **sop-shared-backend**.
+4. **Add the Dockerfile (required for Cloud Run build):**
+   - Click **Add file** → **Create new file**. Name: **sop-shared-backend/Dockerfile**
+   - Open the **Dockerfile** from your **sop-shared-backend** folder on your computer in Notepad, copy all, paste into GitHub. Click **Commit changes**.
+5. Check: In your repo you should see a folder **sop-shared-backend** with **package.json**, **index.js**, and **Dockerfile** inside it.
+6. Then go to **STEP-5-CREATE-SERVICE-FULL.md** and use **Continuously deploy from a repository** with this repo and directory **sop-shared-backend**.
 
 ---
 
@@ -50,7 +53,8 @@ If your SOP app folder is already on GitHub and **sop-shared-backend** is inside
      - Open your local **sop-shared-backend/package.json** in Notepad, copy all (Ctrl+A, Ctrl+C), paste into the big text box on GitHub. Click **Commit changes**.
      - Click **Add file** → **Create new file** again.
      - Name: **sop-shared-backend/index.js**. Open your local **sop-shared-backend/index.js** in Notepad, copy all, paste into the text box. Click **Commit changes**.
-7. In the repo you should now see a folder **sop-shared-backend** containing **package.json** and **index.js**.
+     - Click **Add file** → **Create new file** again. Name: **sop-shared-backend/Dockerfile**. Open your local **sop-shared-backend/Dockerfile** in Notepad, copy all, paste. Click **Commit changes**.
+7. In the repo you should now see a folder **sop-shared-backend** containing **package.json**, **index.js**, and **Dockerfile**.
 8. Go to **STEP-5-CREATE-SERVICE-FULL.md**. In Section 1 choose **Continuously deploy from a repository**, connect this repo, and set **Directory** (or **Root directory**) to **sop-shared-backend**.
 
 ---
@@ -58,5 +62,5 @@ If your SOP app folder is already on GitHub and **sop-shared-backend** is inside
 ## Summary
 
 - Cloud Run has **no upload**. You must use a **repository** (GitHub).
-- Get **sop-shared-backend** (with **package.json** and **index.js** inside it) into a GitHub repo.
+- Get **sop-shared-backend** (with **package.json**, **index.js**, and **Dockerfile** inside it) into a GitHub repo.
 - Then in Cloud Run Create Service, choose **Continuously deploy from a repository**, pick that repo, and set directory to **sop-shared-backend**.
