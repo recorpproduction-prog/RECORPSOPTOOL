@@ -252,7 +252,7 @@ async function loadAllSopsFromCloud() {
     if (typeof window.useSharedAccess === 'function' && window.useSharedAccess())
         return await window.loadAllSopsFromSharedAPI();
     if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive())
-        return await window.loadAllSopsFromCloud();
+        return await window.loadAllSopsFromGoogleDrive();
     return null;
 }
 async function saveSopToCloud(sop) {
@@ -266,7 +266,7 @@ async function deleteSopFromCloud(sopId) {
     if (typeof window.useSharedAccess === 'function' && window.useSharedAccess())
         return await window.deleteSopFromSharedAPI(sopId);
     if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive())
-        return await window.deleteSopFromCloud(sopId);
+        return await window.deleteSopFromGoogleDrive(sopId);
     return false;
 }
 
