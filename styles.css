@@ -288,6 +288,37 @@ header h1 {
     display: none;
 }
 
+/* Workspace access hint – shown when Drive not connected */
+.workspace-access-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    margin: 0 15px 10px;
+    background: #e8f4fd;
+    border: 1px solid #b8daff;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #0c5460;
+}
+.workspace-access-banner.hidden {
+    display: none !important;
+}
+.workspace-access-banner .workspace-access-dismiss {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    font-size: 20px;
+    line-height: 1;
+    color: #0c5460;
+    cursor: pointer;
+    padding: 0 4px;
+}
+.workspace-access-banner .workspace-access-dismiss:hover {
+    color: #000;
+}
+
 .spinner {
     border: 4px solid #f3f3f3;
     border-top: 4px solid #3498db;

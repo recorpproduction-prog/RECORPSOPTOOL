@@ -34,6 +34,7 @@ let stream = null;
 
 // Global logo cache - preload logo on page load
 let cachedLogoImage = null;
+let cachedLogoAspectRatio = null; // width/height for PDF so logo is not distorted
 
 // Flag to track when loading SOP from register (to prevent clearing editor)
 let isLoadingFromRegister = false;
@@ -99,6 +100,9 @@ async function preloadLogo() {
                     console.log('Logo load timeout - trying direct canvas method');
                     // Fallback: try converting directly from loaded element
                     try {
+                        if (logoElement.naturalWidth > 0 && logoElement.naturalHeight > 0) {
+                            cachedLogoAspectRatio = logoElement.naturalWidth / logoElement.naturalHeight;
+                        }
                         const canvas = document.createElement('canvas');
                         canvas.width = logoElement.naturalWidth;
                         canvas.height = logoElement.naturalHeight;
@@ -117,6 +121,9 @@ async function preloadLogo() {
                 img.onload = () => {
                     clearTimeout(timeout);
                     try {
+                        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                            cachedLogoAspectRatio = img.naturalWidth / img.naturalHeight;
+                        }
                         const canvas = document.createElement('canvas');
                         canvas.width = img.naturalWidth;
                         canvas.height = img.naturalHeight;
@@ -129,6 +136,9 @@ async function preloadLogo() {
                         console.error('Canvas conversion failed:', err.message);
                         // Try direct method as fallback
                         try {
+                            if (logoElement.naturalWidth > 0 && logoElement.naturalHeight > 0) {
+                                cachedLogoAspectRatio = logoElement.naturalWidth / logoElement.naturalHeight;
+                            }
                             const canvas = document.createElement('canvas');
                             canvas.width = logoElement.naturalWidth;
                             canvas.height = logoElement.naturalHeight;
@@ -146,8 +156,10 @@ async function preloadLogo() {
                 img.onerror = () => {
                     clearTimeout(timeout);
                     console.error('Image load error - trying direct method');
-                    // Last resort: try direct canvas from element
                     try {
+                        if (logoElement.naturalWidth > 0 && logoElement.naturalHeight > 0) {
+                            cachedLogoAspectRatio = logoElement.naturalWidth / logoElement.naturalHeight;
+                        }
                         const canvas = document.createElement('canvas');
                         canvas.width = logoElement.naturalWidth;
                         canvas.height = logoElement.naturalHeight;
@@ -231,6 +243,33 @@ window.openEmailSettings = async function() {
 
 console.log('🔍 DIAG: Global function stubs set');
 
+// Cloud SOPs: shared API (no OAuth for staff) or Google Drive (Connect per device)
+function useCloudSops() {
+    return (typeof window.useSharedAccess === 'function' && window.useSharedAccess()) ||
+           (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive());
+}
+async function loadAllSopsFromCloud() {
+    if (typeof window.useSharedAccess === 'function' && window.useSharedAccess())
+        return await window.loadAllSopsFromSharedAPI();
+    if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive())
+        return await window.loadAllSopsFromCloud();
+    return null;
+}
+async function saveSopToCloud(sop) {
+    if (typeof window.useSharedAccess === 'function' && window.useSharedAccess())
+        return await window.saveSopToSharedAPI(sop);
+    if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive())
+        return await window.saveSopToGoogleDrive(sop);
+    return false;
+}
+async function deleteSopFromCloud(sopId) {
+    if (typeof window.useSharedAccess === 'function' && window.useSharedAccess())
+        return await window.deleteSopFromSharedAPI(sopId);
+    if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive())
+        return await window.deleteSopFromCloud(sopId);
+    return false;
+}
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', async function() {
     initializeEventListeners();
@@ -239,9 +278,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     preloadLogo();
     
     // Load SOPs from GitHub on startup - NON-BLOCKING (don't break app if GitHub fails)
-    if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
-        // Load asynchronously without blocking app initialization
-        loadAllSopsFromGoogleDrive().then(sops => {
+    if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
+        loadAllSopsFromCloud().then(sops => {
             if (sops && Object.keys(sops).length > 0) {
                 console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from Google Drive`);
             } else {
@@ -410,9 +448,9 @@ async function getNextSequenceNumber(deptCode, year, month) {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('Error loading from GitHub for sequence:', error);
@@ -1309,9 +1347,9 @@ async function saveSopToStorage() {
         
         // SAVE TO GOOGLE DRIVE with localStorage fallback
         let savedToGoogleDrive = false;
-        if (typeof saveSopToGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof saveSopToCloud === 'function' && useCloudSops()) {
             try {
-                await saveSopToGoogleDrive(currentSop);
+                await saveSopToCloud(currentSop);
                 console.log('✅ SOP saved to Google Drive');
                 savedToGoogleDrive = true;
             } catch (error) {
@@ -1384,9 +1422,9 @@ async function showLoadSection() {
     try {
         // LOAD FROM GOOGLE DRIVE
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from Google Drive:', error);
@@ -1492,9 +1530,9 @@ async function downloadExport(index) {
             const exportItem = exports[index];
             // Load full data from GitHub since we only store metadata in exports
             let savedSops = {};
-            if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+            if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
                 try {
-                    const loaded = await loadAllSopsFromGoogleDrive();
+                    const loaded = await loadAllSopsFromCloud();
                     savedSops = loaded || {};
                 } catch (error) {
                     console.error('❌ Error loading from GitHub:', error);
@@ -1533,9 +1571,9 @@ async function loadFromExport(index) {
             const exportItem = exports[index];
             // Load full data from GitHub since we only store metadata in exports
             let savedSops = {};
-            if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+            if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
                 try {
-                    const loaded = await loadAllSopsFromGoogleDrive();
+                    const loaded = await loadAllSopsFromCloud();
                     savedSops = loaded || {};
                 } catch (error) {
                     console.error('❌ Error loading from GitHub:', error);
@@ -1597,9 +1635,9 @@ async function downloadAllExports() {
         
         // Load from GitHub
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -1798,6 +1836,7 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
                 
                 if (logoElement.complete && logoElement.naturalWidth > 0) {
                     try {
+                        cachedLogoAspectRatio = logoElement.naturalWidth / logoElement.naturalHeight;
                         const canvas = document.createElement('canvas');
                         canvas.width = logoElement.naturalWidth;
                         canvas.height = logoElement.naturalHeight;
@@ -1834,6 +1873,9 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
                 img.onload = () => {
                     clearTimeout(timeout);
                     try {
+                        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                            cachedLogoAspectRatio = img.naturalWidth / img.naturalHeight;
+                        }
                         const canvas = document.createElement('canvas');
                         canvas.width = img.naturalWidth;
                         canvas.height = img.naturalHeight;
@@ -1952,15 +1994,30 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
             console.error('Make sure you are running from a local server (http://localhost) not file://');
         }
         
-        // Helper function to add logo to page (header - top right) - MUST ALWAYS SUCCEED
-        function addLogoToPage() {
+        // Helper function to add logo to first page only (header - top right), smaller and correct proportions
+        let logoAddedToPageOne = false;
+        function addLogoToPageOneOnly() {
+            if (logoAddedToPageOne) return;
             if (!logoImage || !logoImage.startsWith('data:image')) {
                 console.error('❌ FATAL: Logo not available for page - this should never happen!');
                 throw new Error('Logo not available - PDF generation should have been blocked');
             }
-            
-            const logoWidth = 40;
-            const logoHeight = 15;
+            logoAddedToPageOne = true;
+            const maxLogoWidth = 25;
+            const maxLogoHeight = 10;
+            let logoWidth, logoHeight;
+            if (cachedLogoAspectRatio != null && cachedLogoAspectRatio > 0) {
+                if (cachedLogoAspectRatio >= 1) {
+                    logoWidth = maxLogoWidth;
+                    logoHeight = maxLogoWidth / cachedLogoAspectRatio;
+                } else {
+                    logoHeight = maxLogoHeight;
+                    logoWidth = maxLogoHeight * cachedLogoAspectRatio;
+                }
+            } else {
+                logoWidth = 25;
+                logoHeight = 9;
+            }
             const logoX = pageWidth - margin - logoWidth;
             const logoY = 10;
             
@@ -1977,21 +2034,19 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
             // Try primary format first
             try {
                 doc.addImage(logoImage, format, logoX, logoY, logoWidth, logoHeight);
-                console.log('✓ Logo added to page header (format: ' + format + ')');
+                console.log('✓ Logo added to page 1 header (format: ' + format + ', size ' + logoWidth.toFixed(1) + 'x' + logoHeight.toFixed(1) + 'mm)');
                 return true;
             } catch (e) {
                 console.warn('Primary format (' + format + ') failed, trying PNG fallback:', e.message);
-                // PNG fallback
                 try {
                     doc.addImage(logoImage, 'PNG', logoX, logoY, logoWidth, logoHeight);
-                    console.log('✓ Logo added to page header (PNG fallback)');
+                    console.log('✓ Logo added to page 1 header (PNG fallback)');
                     return true;
                 } catch (e2) {
                     console.error('PNG fallback failed, trying JPEG:', e2.message);
-                    // JPEG fallback
                     try {
                         doc.addImage(logoImage, 'JPEG', logoX, logoY, logoWidth, logoHeight);
-                        console.log('✓ Logo added to page header (JPEG fallback)');
+                        console.log('✓ Logo added to page 1 header (JPEG fallback)');
                         return true;
                     } catch (e3) {
                         console.error('❌ ALL LOGO ADD METHODS FAILED ❌');
@@ -2002,26 +2057,19 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
             }
         }
         
-        // Helper function to add new page if needed
+        // Helper function to add new page if needed (no logo on new pages - logo only on page 1)
         function checkNewPage(requiredHeight) {
             if (yPos + requiredHeight > maxHeight) {
-                // Add footer to current page before adding new one
                 addFooter();
-                
-                // Add new page
                 doc.addPage();
                 yPos = 20;
-                
-                // ALWAYS add logo to new page
-                addLogoToPage();
-                
                 return true;
             }
             return false;
         }
         
-        // ALWAYS add logo to first page header (top right)
-        addLogoToPage();
+        // Logo only on first page (smaller, correct proportions)
+        addLogoToPageOneOnly();
         
         // Header with title
         doc.setFontSize(18);
@@ -2164,12 +2212,12 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
         
         yPos += 5;
         
-        // Steps
+        // Steps - first step directly under heading when possible
         checkNewPage(15);
         doc.setFontSize(12);
         doc.setFont(undefined, 'bold');
         doc.text('Step-by-Step Instructions', margin, yPos);
-        yPos += 10;
+        yPos += 5;
         
         // Debug: Log steps count
         console.log('=== PDF GENERATION: STEPS ===');
@@ -2471,9 +2519,9 @@ async function refreshRegister() {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -2597,9 +2645,9 @@ async function loadSopFromRegister(key) {
     try {
         // LOAD FROM GITHUB ONLY - NO LOCALSTORAGE
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -2634,9 +2682,9 @@ async function exportSopPdfFromRegister(key) {
     try {
         // LOAD FROM GITHUB FIRST, THEN LOCALSTORAGE FALLBACK
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -2697,8 +2745,8 @@ async function deleteSopFromRegister(key) {
     
     try {
         // DELETE FROM GITHUB ONLY - NO LOCALSTORAGE
-        if (typeof deleteSopFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
-            await deleteSopFromGoogleDrive(key);
+        if (typeof deleteSopFromCloud === 'function' && useCloudSops()) {
+            await deleteSopFromCloud(key);
             console.log('✅ SOP deleted from GitHub:', key);
             
             // If current SOP is deleted, clear it
@@ -3174,9 +3222,9 @@ async function refreshReviewList() {
     try {
         // LOAD FROM GITHUB ONLY - NO LOCALSTORAGE
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3421,9 +3469,9 @@ async function approveSopInline(sopKey) {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3450,9 +3498,9 @@ async function approveSopInline(sopKey) {
         sop.reviewedAt = new Date().toISOString();
         
         // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
-        if (typeof saveSopToGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof saveSopToCloud === 'function' && useCloudSops()) {
             try {
-                await saveSopToGoogleDrive(sop);
+                await saveSopToCloud(sop);
                 console.log('✅ SOP approved and saved to GitHub');
             } catch (error) {
                 console.error('❌ Error saving to GitHub:', error);
@@ -3552,9 +3600,9 @@ async function rejectSopInline(sopKey) {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3581,9 +3629,9 @@ async function rejectSopInline(sopKey) {
         sop.reviewedAt = new Date().toISOString();
         
         // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
-        if (typeof saveSopToGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof saveSopToCloud === 'function' && useCloudSops()) {
             try {
-                await saveSopToGoogleDrive(sop);
+                await saveSopToCloud(sop);
                 console.log('✅ SOP rejected and saved to GitHub');
                 showNotification('SOP returned to Draft status. Author can make changes based on your comments.', 'success');
                 await refreshReviewList();
@@ -3604,9 +3652,9 @@ async function generatePdfFromReviewKey(sopKey) {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3664,9 +3712,9 @@ async function viewSopForReview(sopKey) {
     try {
         // LOAD FROM GITHUB FIRST, THEN LOCALSTORAGE FALLBACK
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3851,9 +3899,9 @@ async function approveSopFromReviewView() {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -3884,9 +3932,9 @@ async function approveSopFromReviewView() {
         sop.reviewedAt = new Date().toISOString();
         
         // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
-        if (typeof saveSopToGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof saveSopToCloud === 'function' && useCloudSops()) {
             try {
-                await saveSopToGoogleDrive(sop);
+                await saveSopToCloud(sop);
                 console.log('✅ SOP approved and saved to GitHub');
             } catch (error) {
                 console.error('❌ Error saving to GitHub:', error);
@@ -3980,9 +4028,9 @@ async function refreshProgressTracker() {
     try {
         // LOAD FROM GITHUB ONLY
         let savedSops = {};
-        if (typeof loadAllSopsFromGoogleDrive === 'function' && window.useGoogleDrive && window.useGoogleDrive()) {
+        if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
             try {
-                const loaded = await loadAllSopsFromGoogleDrive();
+                const loaded = await loadAllSopsFromCloud();
                 savedSops = loaded || {};
             } catch (error) {
                 console.error('❌ Error loading from GitHub:', error);
@@ -4621,18 +4669,27 @@ function updateGoogleDriveStatus() {
     // Use window object to ensure we get the right storage
     const storage = window.googleDriveStorage;
     
-    if (storage && storage.isEnabled && storage.isAuthenticated) {
+    const banner = document.getElementById('workspaceAccessBanner');
+    if (typeof useSharedAccess === 'function' && useSharedAccess()) {
+        statusText.textContent = 'Shared access (no setup required)';
+        statusText.style.color = '#27ae60';
+        if (syncInfo) syncInfo.style.display = 'block';
+        if (banner) banner.classList.add('hidden');
+    } else if (storage && storage.isEnabled && storage.isAuthenticated) {
         statusText.textContent = 'Connected and Authenticated';
         statusText.style.color = '#27ae60';
         if (syncInfo) syncInfo.style.display = 'block';
+        if (banner) banner.classList.add('hidden');
     } else if (storage && storage.isEnabled) {
         statusText.textContent = 'Configured but not authenticated';
         statusText.style.color = '#f39c12';
         if (syncInfo) syncInfo.style.display = 'none';
+        if (banner) banner.classList.remove('hidden');
     } else {
         statusText.textContent = 'Not configured';
         statusText.style.color = '#e74c3c';
         if (syncInfo) syncInfo.style.display = 'none';
+        if (banner) banner.classList.remove('hidden');
     }
 }
 

@@ -35,6 +35,11 @@
             </div>
         </header>
 
+        <div id="workspaceAccessBanner" class="workspace-access-banner hidden" role="status">
+            <span>To see SOPs shared across the worksite on this device, connect once: <strong>☁️ Drive → Connect to Google Drive</strong>. No app login required.</span>
+            <button type="button" class="workspace-access-dismiss" onclick="document.getElementById('workspaceAccessBanner').classList.add('hidden')" aria-label="Dismiss">×</button>
+        </div>
+
         <div id="loadingIndicator" class="loading-indicator hidden">
 <div class="spinner"></div>
             <span>Generating PDF...</span>
@@ -715,12 +720,12 @@
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script>
-        // Force cache bust with timestamp
+        // Shared access: set this to your backend URL so staff get SOPs with no API key or OAuth.
+        // e.g. 'https://your-backend.run.app' (leave empty to use Google Drive + Connect per device).
+        window.SOP_SHARED_API_URL = '';
         const cacheBuster = '?v=' + Date.now();
         document.write('<script src="google-drive-storage.js' + cacheBuster + '"><\/script>');
-        // Keep GitHub storage for backward compatibility (optional)
-        // document.write('<script src="github-repo-storage.js' + cacheBuster + '"><\/script>');
-        // document.write('<script src="github-storage.js' + cacheBuster + '"><\/script>');
+        document.write('<script src="shared-sop-api.js' + cacheBuster + '"><\/script>');
         document.write('<script src="app.js' + cacheBuster + '"><\/script>');
     </script>
 </body>
