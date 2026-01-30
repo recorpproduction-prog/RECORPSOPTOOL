@@ -136,34 +136,60 @@ function saveGoogleDriveConfigToStorage(clientId, apiKey, folderId) {
     }
 }
 
-// Initialize Google API Client
+// Token client from Google Identity Services (replaces deprecated gapi.auth2)
+let gisTokenClient = null;
+
+// Initialize Google API Client (gapi.client only; auth via GIS token client)
 async function initGoogleAPI() {
+    if (window.gapi && window.gapi.client && window.gapi.client.drive) {
+        return;
+    }
     return new Promise((resolve, reject) => {
-        if (window.gapi && window.gapi.client) {
-            resolve();
-            return;
-        }
-        
-        // Wait for gapi to be available (script is loaded in index.html)
-        const checkInterval = setInterval(() => {
-            if (window.gapi) {
-                clearInterval(checkInterval);
-                window.gapi.load('client:auth2', () => {
-                    resolve();
-                });
-            }
+        const checkGapi = () => {
+            if (!window.gapi) return false;
+            window.gapi.load('client', () => {
+                window.gapi.client.init({ apiKey: googleDriveStorage.apiKey })
+                    .then(() => window.gapi.client.load('https://www.googleapis.com/discovery/v1/apis/drive/v3/rest'))
+                    .then(() => {
+                        if (googleDriveStorage.accessToken && window.gapi.client.setToken) {
+                            window.gapi.client.setToken({ access_token: googleDriveStorage.accessToken });
+                        }
+                        resolve();
+                    })
+                    .catch(reject);
+            });
+            return true;
+        };
+        const id = setInterval(() => {
+            if (checkGapi()) clearInterval(id);
         }, 100);
-        
         setTimeout(() => {
-            clearInterval(checkInterval);
-            reject(new Error('Google API failed to load. Make sure the Google API script is included in index.html'));
-        }, 10000);
+            clearInterval(id);
+            if (!window.gapi || !window.gapi.client) {
+                reject(new Error('Google API failed to load. Make sure the Google API script is included in index.html'));
+            }
+        }, 15000);
     });
 }
 
-// Authenticate with Google Drive
+function getOrCreateTokenClient() {
+    if (gisTokenClient) return gisTokenClient;
+    if (typeof google === 'undefined' || !google.accounts || !google.accounts.oauth2 || !google.accounts.oauth2.initTokenClient) {
+        throw new Error('Google Identity Services (GIS) script not loaded. Please refresh the page.');
+    }
+    gisTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: googleDriveStorage.clientId,
+        scope: SCOPES,
+        callback: () => {},
+        error_callback: (err) => {
+            console.error('GIS token error:', err);
+        }
+    });
+    return gisTokenClient;
+}
+
+// Authenticate with Google Drive (Google Identity Services token model)
 async function authenticateGoogleDrive() {
-    // Re-initialize config from localStorage to ensure we have latest
     initGoogleDriveStorage();
     
     if (!googleDriveStorage.isEnabled || !googleDriveStorage.clientId || !googleDriveStorage.apiKey) {
@@ -172,59 +198,36 @@ async function authenticateGoogleDrive() {
     
     try {
         await initGoogleAPI();
+        const tokenClient = getOrCreateTokenClient();
         
-        // Check if client is already initialized - if so, we may need to re-init with new credentials
-        let needsInit = true;
-        if (window.gapi.client && window.gapi.client.getToken) {
-            try {
-                // Try to get current config to see if it matches
-                const currentApiKey = window.gapi.client.apiKey;
-                if (currentApiKey === googleDriveStorage.apiKey) {
-                    needsInit = false;
+        return new Promise((resolve, reject) => {
+            tokenClient.callback = (tokenResponse) => {
+                if (tokenResponse.error) {
+                    const msg = tokenResponse.error_description || tokenResponse.error || 'Failed to get access token';
+                    googleDriveStorage.isAuthenticated = false;
+                    reject(new Error(msg));
+                    return;
                 }
-            } catch (e) {
-                // Client not properly initialized, need to init
-            }
-        }
-        
-        if (needsInit) {
-            await window.gapi.client.init({
-                apiKey: googleDriveStorage.apiKey,
-                clientId: googleDriveStorage.clientId,
-                discoveryDocs: DISCOVERY_DOCS,
-                scope: SCOPES
-            });
-        }
-        
-        const authInstance = window.gapi.auth2.getAuthInstance();
-        if (!authInstance) {
-            throw new Error('Failed to get auth instance. Please check your Client ID.');
-        }
-        
-        const user = authInstance.currentUser.get();
-        
-        if (!user.isSignedIn()) {
-            // Sign in
-            await authInstance.signIn();
-        }
-        
-        const authResponse = user.getAuthResponse();
-        if (!authResponse || !authResponse.access_token) {
-            throw new Error('Failed to get access token. Please try again.');
-        }
-        
-        googleDriveStorage.accessToken = authResponse.access_token;
-        googleDriveStorage.isAuthenticated = true;
-        
-        // Save token with expiration
-        const tokenData = {
-            access_token: authResponse.access_token,
-            expires_at: Date.now() + (authResponse.expires_in * 1000)
-        };
-        localStorage.setItem('googleDriveToken', JSON.stringify(tokenData));
-        
-        console.log('✅ Google Drive authenticated');
-        return true;
+                const accessToken = tokenResponse.access_token;
+                const expiresIn = tokenResponse.expires_in || 3600;
+                googleDriveStorage.accessToken = accessToken;
+                googleDriveStorage.isAuthenticated = true;
+                window.gapi.client.setToken({ access_token: accessToken });
+                const tokenData = {
+                    access_token: accessToken,
+                    expires_at: Date.now() + (expiresIn * 1000)
+                };
+                localStorage.setItem('googleDriveToken', JSON.stringify(tokenData));
+                console.log('✅ Google Drive authenticated (GIS)');
+                resolve(true);
+            };
+            tokenClient.error_callback = (err) => {
+                const msg = (err && (err.message || err.type)) ? (err.message || err.type) : 'Authorization was cancelled or failed.';
+                googleDriveStorage.isAuthenticated = false;
+                reject(new Error(msg));
+            };
+            tokenClient.requestAccessToken({ prompt: 'consent' });
+        });
     } catch (error) {
         const msg = (error && (error.details || error.message || (typeof error.error === 'string' ? error.error : null))) || (typeof error === 'string' ? error : JSON.stringify(error));
         console.error('Error authenticating with Google Drive:', msg, error);
@@ -233,14 +236,15 @@ async function authenticateGoogleDrive() {
     }
 }
 
-// Sign out from Google Drive
+// Sign out from Google Drive (revoke token via GIS)
 async function signOutGoogleDrive() {
     try {
-        if (window.gapi && window.gapi.auth2) {
-            const authInstance = window.gapi.auth2.getAuthInstance();
-            if (authInstance) {
-                await authInstance.signOut();
-            }
+        const token = googleDriveStorage.accessToken;
+        if (token && typeof google !== 'undefined' && google.accounts && google.accounts.oauth2 && google.accounts.oauth2.revoke) {
+            google.accounts.oauth2.revoke(token, () => {});
+        }
+        if (window.gapi && window.gapi.client && window.gapi.client.setToken) {
+            window.gapi.client.setToken(null);
         }
         googleDriveStorage.accessToken = null;
         googleDriveStorage.isAuthenticated = false;

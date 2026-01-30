@@ -711,8 +711,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-    <!-- Google Drive API -->
+    <!-- Google Drive: gapi.client for API calls + GIS for OAuth (no deprecated auth2) -->
     <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script>
         // Force cache bust with timestamp
         const cacheBuster = '?v=' + Date.now();
