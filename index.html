@@ -6,6 +6,9 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>SOP Creation Tool</title>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -38,6 +41,10 @@
         <div id="workspaceAccessBanner" class="workspace-access-banner hidden" role="status">
             <span>To see SOPs shared across the worksite on this device, connect once: <strong>☁️ Drive → Connect to Google Drive</strong>. No app login required.</span>
             <button type="button" class="workspace-access-dismiss" onclick="document.getElementById('workspaceAccessBanner').classList.add('hidden')" aria-label="Dismiss">×</button>
+        </div>
+        <div id="connectionErrorBanner" class="workspace-access-banner" style="background:#c0392b;color:#fff;display:none;" role="alert">
+            <span id="connectionErrorText">Cannot reach SOP server. Check internet connection.</span>
+            <button type="button" class="workspace-access-dismiss" onclick="retryConnectionAndRefresh()" style="background:rgba(255,255,255,0.2);color:#fff;">Retry</button>
         </div>
 
         <div id="loadingIndicator" class="loading-indicator hidden">

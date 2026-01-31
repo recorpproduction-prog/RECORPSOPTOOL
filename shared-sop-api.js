@@ -19,7 +19,14 @@
         const base = getBaseUrl();
         if (!base) return null;
         try {
-            const res = await fetch(base + '/sops', { method: 'GET', headers: { Accept: 'application/json' } });
+            const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeout = setTimeout(() => ctrl && ctrl.abort(), 15000);
+            const res = await fetch(base + '/sops', {
+                method: 'GET',
+                headers: { Accept: 'application/json' },
+                signal: ctrl ? ctrl.signal : undefined
+            });
+            clearTimeout(timeout);
             const data = res.ok ? await res.json() : (await res.text().then(t => { try { return JSON.parse(t); } catch (_) { return {}; } }));
             if (!res.ok) {
                 const msg = (data && data.error) ? data.error : (res.statusText || 'Failed to load SOPs');
@@ -29,8 +36,9 @@
             if (typeof sops === 'object' && !Array.isArray(sops)) return sops;
             return {};
         } catch (e) {
-            console.warn('Shared SOP API load failed:', e.message);
-            throw e;
+            const msg = e.name === 'AbortError' ? 'Request timed out (try again on better connection)' : e.message;
+            console.warn('Shared SOP API load failed:', msg);
+            throw new Error(msg);
         }
     }
 

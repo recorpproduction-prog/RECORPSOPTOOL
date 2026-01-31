@@ -270,18 +270,46 @@ async function deleteSopFromCloud(sopId) {
     return false;
 }
 
+async function testBackendConnection() {
+    const base = typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl || '');
+    if (!base) return true;
+    try {
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timeout = setTimeout(() => ctrl && ctrl.abort(), 10000);
+        const res = await fetch(base.replace(/\/$/, '') + '/sops', { method: 'GET', headers: { Accept: 'application/json' }, signal: ctrl ? ctrl.signal : undefined });
+        clearTimeout(timeout);
+        return res.ok;
+    } catch (_) { return false; }
+}
+
+async function retryConnectionAndRefresh() {
+    const banner = document.getElementById('connectionErrorBanner');
+    const textEl = document.getElementById('connectionErrorText');
+    if (textEl) textEl.textContent = 'Checking connection...';
+    const ok = await testBackendConnection();
+    if (banner) banner.style.display = ok ? 'none' : '';
+    if (textEl && !ok) textEl.textContent = 'Cannot reach SOP server. Check internet and try again.';
+    if (ok) {
+        if (typeof refreshRegister === 'function') refreshRegister();
+        if (typeof refreshReviewList === 'function') refreshReviewList();
+    }
+}
+
 /** Load SOPs from cloud + localStorage merge. Single source of truth for all data loading. */
 async function loadAllSopsMerged() {
     let savedSops = {};
+    let cloudError = null;
     if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
         try {
             const loaded = await loadAllSopsFromCloud();
             savedSops = loaded || {};
         } catch (e) {
-            console.warn('Cloud load failed, using localStorage:', e.message);
+            cloudError = e;
+            console.warn('Cloud load failed:', e.message);
         }
         const local = JSON.parse(localStorage.getItem('savedSops') || '{}');
         Object.keys(local).forEach(key => { if (local[key] && local[key].meta && !savedSops[key]) savedSops[key] = local[key]; });
+        if (cloudError && Object.keys(savedSops).length === 0) throw cloudError;
     } else {
         savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
     }
@@ -295,17 +323,14 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Preload logo immediately
     preloadLogo();
     
-    // Load SOPs from shared backend on startup - NON-BLOCKING (don't break app if backend fails)
-    if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
-        loadAllSopsFromCloud().then(sops => {
-            if (sops && Object.keys(sops).length > 0) {
-                console.log(`✅ Loaded ${Object.keys(sops).length} SOPs from shared backend`);
-            } else {
-                console.log('📝 No SOPs in shared storage yet');
-            }
-        }).catch(error => {
-            console.warn('⚠️ Shared backend load failed:', error.message);
-            showNotification('SOPs not loading: ' + (error.message || 'Check Cloud Run env vars (SOP_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_JSON) and Drive folder share.'), 'error');
+    // Test backend connection on startup when using shared access
+    if (typeof useSharedAccess === 'function' && useSharedAccess()) {
+        testBackendConnection().then(ok => {
+            const banner = document.getElementById('connectionErrorBanner');
+            if (banner) banner.style.display = ok ? 'none' : '';
+        }).catch(() => {
+            const banner = document.getElementById('connectionErrorBanner');
+            if (banner) banner.style.display = '';
         });
     }
     
@@ -1436,7 +1461,11 @@ async function showLoadSection() {
         try {
             savedSops = await loadAllSopsMerged();
         } catch (error) {
-            list.innerHTML = '<p>Error loading SOPs: ' + escapeHtml(error.message) + '</p>';
+            const msg = error.message || 'Check connection.';
+            list.innerHTML = '<p>Error loading SOPs: ' + escapeHtml(msg) + '</p>';
+            const banner = document.getElementById('connectionErrorBanner');
+            const textEl = document.getElementById('connectionErrorText');
+            if (banner && textEl) { textEl.textContent = msg; banner.style.display = ''; }
             return;
         }
         if (Object.keys(savedSops).length === 0 && !useCloudSops()) {
@@ -2482,7 +2511,11 @@ async function refreshRegister() {
             savedSops = await loadAllSopsMerged();
         } catch (error) {
             renderRegisterTable([]);
-            showNotification('Could not load SOPs: ' + (error.message || 'Check backend configuration.'), 'error');
+            const msg = error.message || 'Check connection.';
+            showNotification('Could not load SOPs: ' + msg, 'error');
+            const banner = document.getElementById('connectionErrorBanner');
+            const textEl = document.getElementById('connectionErrorText');
+            if (banner && textEl) { textEl.textContent = msg; banner.style.display = ''; }
             return;
         }
         allSops = [];
@@ -3125,6 +3158,7 @@ window.exportRegister = exportRegister;
 window.loadSopFromRegister = loadSopFromRegister;
 window.exportSopPdfFromRegister = exportSopPdfFromRegister;
 window.deleteSopFromRegister = deleteSopFromRegister;
+window.retryConnectionAndRefresh = retryConnectionAndRefresh;
 window.autoGenerateSopId = autoGenerateSopId;
 
 // Review Functions
@@ -3178,6 +3212,11 @@ async function refreshReviewList() {
     } catch (e) {
         console.error('Error refreshing review list:', e);
         renderReviewList([]);
+        const msg = e.message || 'Check connection.';
+        showNotification('Could not load SOPs: ' + msg, 'error');
+        const banner = document.getElementById('connectionErrorBanner');
+        const textEl = document.getElementById('connectionErrorText');
+        if (banner && textEl) { textEl.textContent = msg; banner.style.display = ''; }
     }
 }
 
