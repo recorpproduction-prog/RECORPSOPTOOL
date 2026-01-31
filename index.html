@@ -11,6 +11,7 @@
     <meta http-equiv="Expires" content="0">
     <title>SOP Creation Tool</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="sop-config.js?v=1"></script>
 </head>
 <body>
     <!-- Main App -->
@@ -727,9 +728,7 @@
     <script src="https://apis.google.com/js/api.js"></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script>
-        // Shared access: set this to your backend URL so staff get SOPs with no API key or OAuth.
-        // e.g. 'https://your-backend.run.app' (leave empty to use Google Drive + Connect per device).
-        window.SOP_SHARED_API_URL = 'https://sop-backend-1065392834988.us-central1.run.app';
+        if (typeof window.SOP_SHARED_API_URL === 'undefined') window.SOP_SHARED_API_URL = 'https://sop-backend-1065392834988.us-central1.run.app';
         const cacheBuster = '?v=' + Date.now();
         document.write('<script src="google-drive-storage.js' + cacheBuster + '"><\/script>');
         document.write('<script src="shared-sop-api.js' + cacheBuster + '"><\/script>');

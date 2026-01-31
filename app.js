@@ -271,12 +271,14 @@ async function deleteSopFromCloud(sopId) {
 }
 
 async function testBackendConnection() {
-    const base = typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl || '');
+    let base = typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl || '');
+    if (!base && typeof location !== 'undefined' && /github\.io$/i.test(location.hostname))
+        base = 'https://sop-backend-1065392834988.us-central1.run.app';
     if (!base) return true;
     try {
         const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
         const timeout = setTimeout(() => ctrl && ctrl.abort(), 10000);
-        const res = await fetch(base.replace(/\/$/, '') + '/sops', { method: 'GET', headers: { Accept: 'application/json' }, signal: ctrl ? ctrl.signal : undefined });
+        const res = await fetch(base.replace(/\/$/, '') + '/sops', { method: 'GET', mode: 'cors', credentials: 'omit', headers: { Accept: 'application/json' }, signal: ctrl ? ctrl.signal : undefined });
         clearTimeout(timeout);
         return res.ok;
     } catch (_) { return false; }
@@ -1390,15 +1392,15 @@ async function saveSopToStorage() {
                 console.log('✅ SOP saved to Google Drive');
                 savedToGoogleDrive = true;
             } catch (error) {
-                console.error('❌ Error saving to Google Drive:', error);
-                // Show warning but continue to localStorage fallback
+                console.error('❌ Error saving to cloud/Drive:', error);
                 let errorMsg = error.message || 'Unknown error';
-                if (errorMsg.includes('401') || errorMsg.includes('unauthorized')) {
-                    errorMsg = 'Google Drive auth failed - using local storage. Please reconnect.';
-                } else if (errorMsg.includes('403')) {
-                    errorMsg = 'Google Drive access denied - check permissions.';
-                }
-                showNotification('Google Drive unavailable: ' + errorMsg + ' Saved locally instead.', 'warning');
+                if (errorMsg.includes('401') || errorMsg.includes('unauthorized'))
+                    errorMsg = 'Auth failed – check service account.';
+                else if (errorMsg.includes('403'))
+                    errorMsg = 'Access denied – share Drive folder with service account.';
+                else if (errorMsg.includes('SOP_FOLDER_ID') || errorMsg.includes('not configured'))
+                    errorMsg = 'Backend not configured – set SOP_FOLDER_ID and GOOGLE_SERVICE_ACCOUNT_JSON in Cloud Run.';
+                showNotification('Did NOT save to Drive: ' + errorMsg + ' Saved locally only.', 'error');
                 // Continue to localStorage fallback - don't throw
             }
         }

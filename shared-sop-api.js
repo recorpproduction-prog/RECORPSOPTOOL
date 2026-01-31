@@ -6,9 +6,11 @@
     'use strict';
 
     function getBaseUrl() {
-        const url = typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl);
-        if (!url || typeof url !== 'string') return '';
-        return url.replace(/\/$/, '');
+        let url = typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl);
+        if (!url || typeof url !== 'string') url = '';
+        if (!url && typeof window !== 'undefined' && window.location && /github\.io$/i.test(window.location.hostname))
+            url = 'https://sop-backend-1065392834988.us-central1.run.app';
+        return (url && typeof url === 'string') ? url.replace(/\/$/, '') : '';
     }
 
     function useSharedAccess() {
@@ -23,6 +25,8 @@
             const timeout = setTimeout(() => ctrl && ctrl.abort(), 15000);
             const res = await fetch(base + '/sops', {
                 method: 'GET',
+                mode: 'cors',
+                credentials: 'omit',
                 headers: { Accept: 'application/json' },
                 signal: ctrl ? ctrl.signal : undefined
             });
@@ -45,14 +49,19 @@
     async function saveSopToSharedAPI(sop) {
         const base = getBaseUrl();
         if (!base) return false;
-        const sopId = (sop && sop.meta && sop.meta.sopId) || ('sop-' + Date.now());
         try {
             const res = await fetch(base + '/sops', {
                 method: 'POST',
+                mode: 'cors',
+                credentials: 'omit',
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                 body: JSON.stringify(sop)
             });
-            if (!res.ok) throw new Error(res.statusText || 'Failed to save SOP');
+            const data = res.ok ? null : (await res.text().then(t => { try { return JSON.parse(t); } catch (_) { return {}; } }));
+            if (!res.ok) {
+                const msg = (data && data.error) ? data.error : (res.statusText || 'Failed to save SOP');
+                throw new Error(msg);
+            }
             return true;
         } catch (e) {
             console.error('Shared SOP API save failed:', e);
