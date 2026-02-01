@@ -342,6 +342,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         driveBtn.style.display = 'none';
     }
     
+    // Preload shared users when using shared access
+    if (typeof loadUsersMerged === 'function' && typeof useSharedAccess === 'function' && useSharedAccess()) {
+        loadUsersMerged().catch(() => {});
+    }
+    
     // Load last draft SOP from storage on page load (only on initial page load, not when switching tabs)
     loadSopFromStorage();
     
@@ -1713,6 +1718,13 @@ function updateStatusDisplay() {
     }
 }
 
+function getJsPDF() {
+    const lib = window.jspdf || window.jsPDF;
+    const jsPDF = (lib && lib.jsPDF) || (typeof lib === 'function' ? lib : null);
+    if (!jsPDF || typeof jsPDF !== 'function') throw new Error('PDF library not loaded. If Tracking Prevention is on, try a different browser or disable it for this site.');
+    return jsPDF;
+}
+
 // PDF Export (returns blob if returnBlob is true, otherwise downloads)
 // preserveStatus: if true, don't change status to "Approved" (used when saving and sending to user)
 async function exportToPdf(returnBlob = false, preserveStatus = false) {
@@ -1722,13 +1734,13 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
     if (!currentSop.meta.title || !currentSop.meta.sopId) {
         showNotification('Please fill in at least SOP Title and SOP ID before exporting.', 'warning');
         document.getElementById('loadingIndicator').classList.add('hidden');
-        return;
+        resolve(); return;
     }
     
     if (currentSop.steps.length === 0) {
         showNotification('Please add at least one step before exporting.', 'warning');
         document.getElementById('loadingIndicator').classList.add('hidden');
-        return;
+        resolve(); return;
     }
     
     // Only set status to "Approved" if not preserving status (i.e., when explicitly approving)
@@ -1923,7 +1935,7 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
     console.log('Logo format:', logoImage.substring(0, 50));
     
     try {
-        const { jsPDF } = window.jspdf;
+        const jsPDF = getJsPDF();
         const doc = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
@@ -2047,7 +2059,7 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
             }
         }
         
-        // Helper function to add new page if needed (no logo on new pages - logo only on page 1)
+        // Helper function to add new page if needed (logo only on page 1)
         function checkNewPage(requiredHeight) {
             if (yPos + requiredHeight > maxHeight) {
                 addFooter();
@@ -2300,8 +2312,6 @@ async function exportToPdf(returnBlob = false, preserveStatus = false) {
                 addFooter();
                 doc.addPage();
                 yPos = 20;
-                // ALWAYS add logo to new page
-                addLogoToPage();
             }
             
             // Now draw step header (only once)
@@ -2483,11 +2493,13 @@ window._switchTabImpl = function switchTab(tabName) {
         refreshProgressTracker();
         refreshTasksList();
     } else if (tabName === 'users') {
-        refreshUsersList();
-        populateUserDropdown();
-        populateAllReviewerDropdowns();
+        loadUsersMerged().then(() => {
+            refreshUsersList();
+            populateUserDropdown();
+            populateAllReviewerDropdowns();
+        });
     } else if (tabName === 'editor') {
-        populateUserDropdown();
+        loadUsersMerged().then(() => populateUserDropdown());
     }
     
     // Show/hide floating save button
@@ -2716,7 +2728,7 @@ async function deleteSopFromRegister(key) {
 
 function exportRegister() {
     try {
-        const { jsPDF } = window.jspdf;
+        const jsPDF = getJsPDF();
         const doc = new jsPDF({
             orientation: 'portrait',
             unit: 'mm',
@@ -4567,22 +4579,49 @@ document.addEventListener('DOMContentLoaded', async function() {
 });
 
 // User Management Functions
-function getUsers() {
-    try {
-        const users = localStorage.getItem('sopUsers');
-        return users ? JSON.parse(users) : [];
-    } catch (e) {
-        console.error('Error loading users:', e);
-        return [];
+let usersCache = [];
+
+async function loadUsersMerged() {
+    let users = [];
+    if (typeof loadUsersFromSharedAPI === 'function' && typeof useSharedAccess === 'function' && useSharedAccess()) {
+        try {
+            users = await window.loadUsersFromSharedAPI();
+        } catch (e) { console.warn('Users load from cloud failed:', e.message); }
+        try {
+            const local = JSON.parse(localStorage.getItem('sopUsers') || '[]');
+            const seen = new Set((users || []).map(u => (u.email || '').toLowerCase()));
+            (local || []).forEach(u => { if (u && u.email && !seen.has((u.email || '').toLowerCase())) { users.push(u); seen.add((u.email || '').toLowerCase()); } });
+        } catch (_) {}
+    } else {
+        try { users = JSON.parse(localStorage.getItem('sopUsers') || '[]'); } catch (_) { users = []; }
     }
+    usersCache = Array.isArray(users) ? users : [];
+    try { localStorage.setItem('sopUsers', JSON.stringify(usersCache)); } catch (_) {}
+    return usersCache;
 }
 
-function saveUsers(users) {
+function getUsers() {
+    if (usersCache.length > 0) return usersCache;
     try {
-        localStorage.setItem('sopUsers', JSON.stringify(users));
+        const u = JSON.parse(localStorage.getItem('sopUsers') || '[]');
+        return Array.isArray(u) ? u : [];
+    } catch (e) { return []; }
+}
+
+async function saveUsers(users) {
+    const arr = Array.isArray(users) ? users : [];
+    if (typeof saveUsersToSharedAPI === 'function' && typeof useSharedAccess === 'function' && useSharedAccess()) {
+        try {
+            await window.saveUsersToSharedAPI(arr);
+        } catch (e) {
+            showNotification('Users not synced to cloud: ' + (e.message || 'Check connection'), 'warning');
+        }
+    }
+    try {
+        localStorage.setItem('sopUsers', JSON.stringify(arr));
+        usersCache = arr;
         return true;
     } catch (e) {
-        console.error('Error saving users:', e);
         showNotification('Error saving users: ' + e.message, 'error');
         return false;
     }
@@ -4663,14 +4702,14 @@ function editUser(index) {
     currentEditingUserIndex = index;
 }
 
-function deleteUser(index) {
+async function deleteUser(index) {
     const users = getUsers();
     if (index < 0 || index >= users.length) return;
     
     const user = users[index];
     if (confirm(`Are you sure you want to delete ${user.firstName} ${user.lastName} (${user.email})?`)) {
         users.splice(index, 1);
-        if (saveUsers(users)) {
+        if (await saveUsers(users)) {
             refreshUsersList();
             populateUserDropdown();
             populateAllReviewerDropdowns();
@@ -4679,7 +4718,7 @@ function deleteUser(index) {
     }
 }
 
-function saveUser() {
+async function saveUser() {
     const firstName = document.getElementById('userFirstName').value.trim();
     const lastName = document.getElementById('userLastName').value.trim();
     const email = document.getElementById('userEmail').value.trim();
@@ -4689,7 +4728,6 @@ function saveUser() {
         return;
     }
     
-    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
         showNotification('Please enter a valid email address.', 'warning');
@@ -4698,7 +4736,6 @@ function saveUser() {
     
     const users = getUsers();
     
-    // Check if email already exists (unless editing the same user)
     const existingUserIndex = users.findIndex((u, idx) => {
         return u.email.toLowerCase() === email.toLowerCase() && idx !== currentEditingUserIndex;
     });
@@ -4718,16 +4755,14 @@ function saveUser() {
     };
     
     if (currentEditingUserIndex !== null) {
-        // Edit existing user
         users[currentEditingUserIndex] = user;
         showNotification('User updated successfully!', 'success');
     } else {
-        // Add new user
         users.push(user);
         showNotification('User added successfully!', 'success');
     }
     
-    if (saveUsers(users)) {
+    if (await saveUsers(users)) {
         refreshUsersList();
         populateUserDropdown();
         populateAllReviewerDropdowns();

@@ -82,10 +82,45 @@
         }
     }
 
+    async function loadUsersFromSharedAPI() {
+        const base = getBaseUrl();
+        if (!base) return [];
+        try {
+            const res = await fetch(base + '/users', { method: 'GET', mode: 'cors', credentials: 'omit', headers: { Accept: 'application/json' } });
+            const data = res.ok ? await res.json() : {};
+            const users = (data && data.users) || [];
+            return Array.isArray(users) ? users : [];
+        } catch (e) {
+            console.warn('Shared users load failed:', e.message);
+            return [];
+        }
+    }
+
+    async function saveUsersToSharedAPI(users) {
+        const base = getBaseUrl();
+        if (!base) return false;
+        try {
+            const res = await fetch(base + '/users', {
+                method: 'POST',
+                mode: 'cors',
+                credentials: 'omit',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ users: Array.isArray(users) ? users : [] })
+            });
+            if (!res.ok) throw new Error(res.statusText || 'Failed to save users');
+            return true;
+        } catch (e) {
+            console.error('Shared users save failed:', e);
+            throw e;
+        }
+    }
+
     if (typeof window !== 'undefined') {
         window.useSharedAccess = useSharedAccess;
         window.loadAllSopsFromSharedAPI = loadAllSopsFromSharedAPI;
         window.saveSopToSharedAPI = saveSopToSharedAPI;
         window.deleteSopFromSharedAPI = deleteSopFromSharedAPI;
+        window.loadUsersFromSharedAPI = loadUsersFromSharedAPI;
+        window.saveUsersToSharedAPI = saveUsersToSharedAPI;
     }
 })();
