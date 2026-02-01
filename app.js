@@ -1727,9 +1727,12 @@ function getJsPDF() {
 
 // PDF Export (returns blob if returnBlob is true, otherwise downloads)
 // preserveStatus: if true, don't change status to "Approved" (used when saving and sending to user)
-async function exportToPdf(returnBlob = false, preserveStatus = false) {
+async function exportToPdf(returnBlob = false, preserveStatus = false, skipFormSync = false) {
     return new Promise(async (resolve, reject) => {
-    updateSopData();
+    // Only sync from form when editor is active; when exporting from Register/approval, currentSop is already set
+    if (!skipFormSync && document.getElementById('sopEditor')?.classList.contains('active')) {
+        updateSopData();
+    }
     
     if (!currentSop.meta.title || !currentSop.meta.sopId) {
         showNotification('Please fill in at least SOP Title and SOP ID before exporting.', 'warning');
@@ -2684,8 +2687,8 @@ async function exportSopPdfFromRegister(key) {
         
         document.getElementById('loadingIndicator').classList.remove('hidden');
         
-        // Use the existing PDF export function logic
-        await exportToPdf();
+        // Skip form sync – currentSop is already set from Register; form may be empty/wrong tab
+        await exportToPdf(false, false, true);
         
         // Restore original SOP
         currentSop = originalSop;
@@ -3461,8 +3464,8 @@ async function approveSopInline(sopKey) {
             delete currentSop.savedAt;
             if (currentSop.reviewedAt) delete currentSop.reviewedAt;
             
-            // Generate PDF as blob and display inline
-            const pdfBlob = await exportToPdf(true);
+            // Generate PDF as blob and display inline (skip form sync – currentSop already set)
+            const pdfBlob = await exportToPdf(true, false, true);
             
             // Display PDF in iframe
             const pdfViewer = document.getElementById(`pdf-viewer-${sopKey}`);
@@ -3587,8 +3590,8 @@ async function generatePdfFromReviewKey(sopKey) {
         delete currentSop.savedAt;
         if (currentSop.reviewedAt) delete currentSop.reviewedAt;
         
-        // Generate PDF
-        exportToPdf().catch((error) => {
+        // Generate PDF (skip form sync – currentSop already set from review)
+        exportToPdf(false, false, true).catch((error) => {
             console.error('PDF generation error:', error);
         }).finally(() => {
             // Restore original SOP
@@ -3819,7 +3822,7 @@ async function approveSopFromReviewView() {
         delete currentSop.savedAt;
         if (currentSop.reviewedAt) delete currentSop.reviewedAt;
         
-        const pdfBlob = await exportToPdf(true);
+        const pdfBlob = await exportToPdf(true, false, true);
         const pdfUrl = URL.createObjectURL(pdfBlob);
         
         // Create download link
