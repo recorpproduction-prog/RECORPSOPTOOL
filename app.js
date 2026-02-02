@@ -336,15 +336,19 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
     
+    // Hide Email button (removed from UI)
+    const emailBtn = document.getElementById('emailSettingsBtn');
+    if (emailBtn) emailBtn.style.display = 'none';
     // Hide Drive/cloud settings when using shared access (backend URL) - staff should not access it
     const driveBtn = document.getElementById('googleDriveSettingsBtn');
     if (driveBtn && typeof useSharedAccess === 'function' && useSharedAccess()) {
         driveBtn.style.display = 'none';
     }
     
-    // Preload shared users when using shared access
+    // Preload shared users and requests when using shared access
     if (typeof loadUsersMerged === 'function' && typeof useSharedAccess === 'function' && useSharedAccess()) {
         loadUsersMerged().catch(() => {});
+        if (typeof loadRequestsMerged === 'function') loadRequestsMerged().catch(() => {});
     }
     
     // Load last draft SOP from storage on page load (only on initial page load, not when switching tabs)
@@ -2876,8 +2880,28 @@ window.loadFromFile = loadFromFile;
 // SOP Requests Functions
 let sopRequests = [];
 
+async function loadRequestsMerged() {
+    if (typeof window.loadRequestsFromSharedAPI === 'function' && typeof useSharedAccess === 'function' && useSharedAccess()) {
+        try {
+            const cloud = await window.loadRequestsFromSharedAPI();
+            const local = JSON.parse(localStorage.getItem('sopRequests') || '[]');
+            const byId = {};
+            (cloud || []).forEach(r => { if (r && r.id) byId[r.id] = r; });
+            (local || []).forEach(r => { if (r && r.id && !byId[r.id]) byId[r.id] = r; });
+            const merged = Object.values(byId).sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+            sopRequests = merged;
+            try { localStorage.setItem('sopRequests', JSON.stringify(merged)); } catch (_) {}
+            return merged;
+        } catch (e) {
+            console.warn('Requests load from cloud failed:', e.message);
+        }
+    }
+    sopRequests = JSON.parse(localStorage.getItem('sopRequests') || '[]');
+    return sopRequests;
+}
+
 // Store implementation
-window._submitSopRequestImpl = function submitSopRequest(event) {
+window._submitSopRequestImpl = async function submitSopRequest(event) {
     // Prevent default form submission if event is provided
     if (event && typeof event.preventDefault === 'function') {
         event.preventDefault();
@@ -2928,6 +2952,10 @@ window._submitSopRequestImpl = function submitSopRequest(event) {
         console.log('Current requests in storage:', requests.length);
         requests.push(request);
         localStorage.setItem('sopRequests', JSON.stringify(requests));
+        if (typeof window.saveRequestsToSharedAPI === 'function' && useCloudSops()) {
+            try { await window.saveRequestsToSharedAPI(requests); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
+        }
+        sopRequests = requests;
         console.log('Request saved. Total requests:', requests.length);
         
         clearRequestForm();
@@ -2944,9 +2972,9 @@ function clearRequestForm() {
     document.getElementById('sopRequestForm').reset();
 }
 
-function refreshRequestsList() {
+async function refreshRequestsList() {
     try {
-        sopRequests = JSON.parse(localStorage.getItem('sopRequests') || '[]');
+        await loadRequestsMerged();
         filterRequests();
     } catch (e) {
         console.error('Error loading requests:', e);
@@ -3129,13 +3157,17 @@ function startSopFromRequest(requestId) {
     showNotification('SOP started from request. Fill in the details and save.', 'success');
 }
 
-function markRequestStatus(requestId, status) {
+async function markRequestStatus(requestId, status) {
     try {
         const requests = JSON.parse(localStorage.getItem('sopRequests') || '[]');
         const index = requests.findIndex(r => r.id === requestId);
         if (index !== -1) {
             requests[index].status = status;
             localStorage.setItem('sopRequests', JSON.stringify(requests));
+            if (typeof window.saveRequestsToSharedAPI === 'function' && useCloudSops()) {
+                try { await window.saveRequestsToSharedAPI(requests); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
+            }
+            sopRequests = requests;
             refreshRequestsList();
         }
     } catch (e) {
@@ -3144,12 +3176,16 @@ function markRequestStatus(requestId, status) {
 }
 
 function deleteRequest(requestId) {
-    showConfirmation('Delete Request', 'Are you sure you want to delete this request?').then(confirmed => {
+    showConfirmation('Delete Request', 'Are you sure you want to delete this request?').then(async confirmed => {
         if (confirmed) {
             try {
                 const requests = JSON.parse(localStorage.getItem('sopRequests') || '[]');
                 const filtered = requests.filter(r => r.id !== requestId);
                 localStorage.setItem('sopRequests', JSON.stringify(filtered));
+                if (typeof window.saveRequestsToSharedAPI === 'function' && useCloudSops()) {
+                    try { await window.saveRequestsToSharedAPI(filtered); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
+                }
+                sopRequests = filtered;
                 refreshRequestsList();
                 showNotification('Request deleted.', 'success');
             } catch (e) {
