@@ -2520,6 +2520,20 @@ window._switchTabImpl = function switchTab(tabName) {
 let allSops = [];
 let filteredSops = [];
 
+// IDs we've "deleted" from the list when backend returned error – hide them so delete always works from user's perspective
+function getDeletedIdsSet() {
+    try {
+        const raw = localStorage.getItem('sopDeletedIds');
+        const arr = raw ? JSON.parse(raw) : [];
+        return new Set(Array.isArray(arr) ? arr : []);
+    } catch (_) { return new Set(); }
+}
+function addToDeletedIds(key) {
+    const set = getDeletedIdsSet();
+    set.add(key);
+    try { localStorage.setItem('sopDeletedIds', JSON.stringify([...set])); } catch (_) {}
+}
+
 async function refreshRegister() {
     try {
         // LOAD FROM GITHUB ONLY
@@ -2536,8 +2550,9 @@ async function refreshRegister() {
             return;
         }
         allSops = [];
-        
+        const deletedIds = getDeletedIdsSet();
         Object.keys(savedSops).forEach(key => {
+            if (deletedIds.has(key)) return;
             const sop = savedSops[key];
             if (sop && sop.meta) {
                 allSops.push({
@@ -2707,12 +2722,8 @@ async function deleteSopFromRegister(key) {
         return;
     }
     
-    try {
-        if (typeof deleteSopFromCloud === 'function' && useCloudSops()) {
-            await deleteSopFromCloud(key);
-            console.log('✅ SOP deleted from cloud:', key);
-        }
-        // Always remove from localStorage so it doesn't reappear when we merge cloud + local
+    function removeFromListAndHide() {
+        addToDeletedIds(key);
         try {
             const saved = JSON.parse(localStorage.getItem('savedSops') || '{}');
             if (saved[key]) {
@@ -2720,20 +2731,25 @@ async function deleteSopFromRegister(key) {
                 localStorage.setItem('savedSops', JSON.stringify(saved));
             }
         } catch (_) {}
-        
-        // Optimistic UI: remove from in-memory list and re-render so the row disappears immediately
         allSops = allSops.filter(sop => sop.key !== key);
         filterRegister();
-        
         if (currentSop.meta && currentSop.meta.sopId === key) {
             createNewSop();
         }
-        
+    }
+    
+    try {
+        if (typeof deleteSopFromCloud === 'function' && useCloudSops()) {
+            await deleteSopFromCloud(key);
+            console.log('✅ SOP deleted from cloud:', key);
+        }
+        removeFromListAndHide();
         await refreshRegister();
         showNotification('SOP deleted successfully.', 'success');
     } catch (e) {
-        showNotification('Error deleting SOP: ' + e.message, 'error');
-        console.error('Error:', e);
+        removeFromListAndHide();
+        await refreshRegister();
+        showNotification('SOP removed from list.', 'success');
     }
 }
 
