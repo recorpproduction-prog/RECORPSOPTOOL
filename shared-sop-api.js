@@ -73,8 +73,22 @@
         const base = getBaseUrl();
         if (!base) return false;
         try {
-            const res = await fetch(base + '/sops/' + encodeURIComponent(sopId), { method: 'DELETE' });
-            if (!res.ok) throw new Error(res.statusText || 'Failed to delete SOP');
+            const res = await fetch(base + '/sops/' + encodeURIComponent(sopId), {
+                method: 'DELETE',
+                mode: 'cors',
+                credentials: 'omit',
+                headers: { Accept: 'application/json' }
+            });
+            if (res.status === 404) return true; // already gone
+            if (!res.ok) {
+                const text = await res.text();
+                let msg = res.status + ' ' + (res.statusText || '');
+                try {
+                    const data = text ? JSON.parse(text) : {};
+                    if (data.error && typeof data.error === 'string') msg = data.error;
+                } catch (_) { /* use msg as-is */ }
+                throw new Error(msg);
+            }
             return true;
         } catch (e) {
             console.error('Shared SOP API delete failed:', e);

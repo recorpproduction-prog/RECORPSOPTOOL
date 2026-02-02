@@ -2708,21 +2708,29 @@ async function deleteSopFromRegister(key) {
     }
     
     try {
-        // DELETE FROM GITHUB ONLY - NO LOCALSTORAGE
         if (typeof deleteSopFromCloud === 'function' && useCloudSops()) {
             await deleteSopFromCloud(key);
-            console.log('✅ SOP deleted from GitHub:', key);
-            
-            // If current SOP is deleted, clear it
-            if (currentSop.meta.sopId === key) {
-                createNewSop();
-            }
-            
-            await refreshRegister();
-            showNotification('SOP deleted successfully.', 'success');
-        } else {
-            showNotification('GitHub storage not available', 'error');
+            console.log('✅ SOP deleted from cloud:', key);
         }
+        // Always remove from localStorage so it doesn't reappear when we merge cloud + local
+        try {
+            const saved = JSON.parse(localStorage.getItem('savedSops') || '{}');
+            if (saved[key]) {
+                delete saved[key];
+                localStorage.setItem('savedSops', JSON.stringify(saved));
+            }
+        } catch (_) {}
+        
+        // Optimistic UI: remove from in-memory list and re-render so the row disappears immediately
+        allSops = allSops.filter(sop => sop.key !== key);
+        filterRegister();
+        
+        if (currentSop.meta && currentSop.meta.sopId === key) {
+            createNewSop();
+        }
+        
+        await refreshRegister();
+        showNotification('SOP deleted successfully.', 'success');
     } catch (e) {
         showNotification('Error deleting SOP: ' + e.message, 'error');
         console.error('Error:', e);
