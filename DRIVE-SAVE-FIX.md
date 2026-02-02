@@ -33,7 +33,7 @@ When you click **Save**, SOPs go to the **Cloud Run backend**, which writes them
 4. In Google Drive, right‑click your SOPs folder → **Share**
 5. Paste the service account email → **Editor** → **Share**
 
-The backend can only save SOPs into folders shared with this email.
+The backend can only save and **delete** SOPs in folders shared with this email. Use **Editor** (not Viewer)—otherwise you get "The user does not have sufficient permissions for this file" when deleting. If the folder is in a **Shared Drive**, add the service account to the Shared Drive as **Content manager**. See **DRIVE-DELETE-PERMISSIONS.md** for details.
 
 ---
 
@@ -72,7 +72,7 @@ The backend can only save SOPs into folders shared with this email.
 | Error | What to do |
 |-------|------------|
 | **Backend not configured** | Set `SOP_FOLDER_ID` and `GOOGLE_SERVICE_ACCOUNT_JSON` in Cloud Run |
-| **Access denied** | Share the Drive folder with the service account email (Editor) |
+| **Access denied** / **Insufficient permissions** | Share the Drive folder with the service account email as **Editor** (not Viewer). See **DRIVE-DELETE-PERMISSIONS.md** for delete errors. |
 | **404 / Not found** | Check `SOP_FOLDER_ID` is correct (from the folder URL) |
 | **401 / Auth failed** | Check `GOOGLE_SERVICE_ACCOUNT_JSON` is valid and not truncated |
 
