@@ -345,8 +345,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         driveBtn.style.display = 'none';
     }
     
-    // Preload shared users and requests when using shared access
-    if (typeof loadUsersMerged === 'function' && typeof useSharedAccess === 'function' && useSharedAccess()) {
+    // Preload shared users and requests from Drive/backend on all devices when backend URL is set
+    if (typeof loadUsersMerged === 'function' && typeof useSharedApiForData === 'function' && useSharedApiForData()) {
         loadUsersMerged().catch(() => {});
         if (typeof loadRequestsMerged === 'function') loadRequestsMerged().catch(() => {});
     }
@@ -2881,7 +2881,7 @@ window.loadFromFile = loadFromFile;
 let sopRequests = [];
 
 async function loadRequestsMerged() {
-    if (typeof window.loadRequestsFromSharedAPI === 'function' && typeof useSharedAccess === 'function' && useSharedAccess()) {
+    if (typeof window.loadRequestsFromSharedAPI === 'function' && useSharedApiForData()) {
         try {
             const cloud = await window.loadRequestsFromSharedAPI();
             const local = JSON.parse(localStorage.getItem('sopRequests') || '[]');
@@ -2952,7 +2952,7 @@ window._submitSopRequestImpl = async function submitSopRequest(event) {
         console.log('Current requests in storage:', requests.length);
         requests.push(request);
         localStorage.setItem('sopRequests', JSON.stringify(requests));
-        if (typeof window.saveRequestsToSharedAPI === 'function' && useCloudSops()) {
+        if (typeof window.saveRequestsToSharedAPI === 'function' && useSharedApiForData()) {
             try { await window.saveRequestsToSharedAPI(requests); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
         }
         sopRequests = requests;
@@ -3164,7 +3164,7 @@ async function markRequestStatus(requestId, status) {
         if (index !== -1) {
             requests[index].status = status;
             localStorage.setItem('sopRequests', JSON.stringify(requests));
-            if (typeof window.saveRequestsToSharedAPI === 'function' && useCloudSops()) {
+            if (typeof window.saveRequestsToSharedAPI === 'function' && useSharedApiForData()) {
                 try { await window.saveRequestsToSharedAPI(requests); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
             }
             sopRequests = requests;
@@ -3182,7 +3182,7 @@ function deleteRequest(requestId) {
                 const requests = JSON.parse(localStorage.getItem('sopRequests') || '[]');
                 const filtered = requests.filter(r => r.id !== requestId);
                 localStorage.setItem('sopRequests', JSON.stringify(filtered));
-                if (typeof window.saveRequestsToSharedAPI === 'function' && useCloudSops()) {
+                if (typeof window.saveRequestsToSharedAPI === 'function' && useSharedApiForData()) {
                     try { await window.saveRequestsToSharedAPI(filtered); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
                 }
                 sopRequests = filtered;
@@ -4644,9 +4644,15 @@ document.addEventListener('DOMContentLoaded', async function() {
 // User Management Functions
 let usersCache = [];
 
+function useSharedApiForData() {
+    if (typeof useSharedAccess === 'function' && useSharedAccess()) return true;
+    const url = (typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl || ''));
+    return !!url;
+}
+
 async function loadUsersMerged() {
     let users = [];
-    if (typeof loadUsersFromSharedAPI === 'function' && typeof useSharedAccess === 'function' && useSharedAccess()) {
+    if (typeof window.loadUsersFromSharedAPI === 'function' && useSharedApiForData()) {
         try {
             users = await window.loadUsersFromSharedAPI();
         } catch (e) { console.warn('Users load from cloud failed:', e.message); }
@@ -4673,7 +4679,7 @@ function getUsers() {
 
 async function saveUsers(users) {
     const arr = Array.isArray(users) ? users : [];
-    if (typeof saveUsersToSharedAPI === 'function' && typeof useSharedAccess === 'function' && useSharedAccess()) {
+    if (typeof window.saveUsersToSharedAPI === 'function' && useSharedApiForData()) {
         try {
             await window.saveUsersToSharedAPI(arr);
         } catch (e) {

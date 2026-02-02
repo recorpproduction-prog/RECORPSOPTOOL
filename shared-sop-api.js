@@ -8,8 +8,7 @@
     function getBaseUrl() {
         let url = typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl);
         if (!url || typeof url !== 'string') url = '';
-        if (!url && typeof window !== 'undefined' && window.location && /github\.io$/i.test(window.location.hostname))
-            url = 'https://sop-backend-1065392834988.us-central1.run.app';
+        if (!url) url = 'https://sop-backend-1065392834988.us-central1.run.app';
         return (url && typeof url === 'string') ? url.replace(/\/$/, '') : '';
     }
 
@@ -100,7 +99,16 @@
         const base = getBaseUrl();
         if (!base) return [];
         try {
-            const res = await fetch(base + '/users', { method: 'GET', mode: 'cors', credentials: 'omit', headers: { Accept: 'application/json' } });
+            const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeout = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
+            const res = await fetch(base + '/users', {
+                method: 'GET',
+                mode: 'cors',
+                credentials: 'omit',
+                headers: { Accept: 'application/json' },
+                signal: ctrl ? ctrl.signal : undefined
+            });
+            clearTimeout(timeout);
             const data = res.ok ? await res.json() : {};
             const users = (data && data.users) || [];
             return Array.isArray(users) ? users : [];
@@ -129,6 +137,48 @@
         }
     }
 
+    async function loadRequestsFromSharedAPI() {
+        const base = getBaseUrl();
+        if (!base) return [];
+        try {
+            const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            const timeout = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
+            const res = await fetch(base + '/requests', {
+                method: 'GET',
+                mode: 'cors',
+                credentials: 'omit',
+                headers: { Accept: 'application/json' },
+                signal: ctrl ? ctrl.signal : undefined
+            });
+            clearTimeout(timeout);
+            const data = res.ok ? await res.json() : {};
+            const requests = (data && data.requests) || [];
+            return Array.isArray(requests) ? requests : [];
+        } catch (e) {
+            console.warn('Shared requests load failed:', e.message);
+            return [];
+        }
+    }
+
+    async function saveRequestsToSharedAPI(requests) {
+        const base = getBaseUrl();
+        if (!base) return false;
+        try {
+            const res = await fetch(base + '/requests', {
+                method: 'POST',
+                mode: 'cors',
+                credentials: 'omit',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify({ requests: Array.isArray(requests) ? requests : [] })
+            });
+            if (!res.ok) throw new Error(res.statusText || 'Failed to save requests');
+            return true;
+        } catch (e) {
+            console.error('Shared requests save failed:', e);
+            throw e;
+        }
+    }
+
     if (typeof window !== 'undefined') {
         window.useSharedAccess = useSharedAccess;
         window.loadAllSopsFromSharedAPI = loadAllSopsFromSharedAPI;
@@ -136,5 +186,7 @@
         window.deleteSopFromSharedAPI = deleteSopFromSharedAPI;
         window.loadUsersFromSharedAPI = loadUsersFromSharedAPI;
         window.saveUsersToSharedAPI = saveUsersToSharedAPI;
+        window.loadRequestsFromSharedAPI = loadRequestsFromSharedAPI;
+        window.saveRequestsToSharedAPI = saveRequestsToSharedAPI;
     }
 })();
