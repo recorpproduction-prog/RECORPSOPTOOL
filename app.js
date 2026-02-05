@@ -345,9 +345,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         driveBtn.style.display = 'none';
     }
     
-    // Preload shared users and requests from Drive/backend on all devices when backend URL is set
-    if (typeof loadUsersMerged === 'function' && typeof useSharedApiForData === 'function' && useSharedApiForData()) {
-        loadUsersMerged().catch(() => {});
+    // Preload shared users and requests from Drive/backend on all devices (always try when API exists)
+    if (typeof loadUsersFromSharedAPI === 'function' || typeof loadUsersMerged === 'function') {
+        if (typeof loadUsersMerged === 'function') loadUsersMerged().catch(() => {});
+    }
+    if (typeof loadRequestsFromSharedAPI === 'function' || typeof loadRequestsMerged === 'function') {
         if (typeof loadRequestsMerged === 'function') loadRequestsMerged().catch(() => {});
     }
     
@@ -2881,7 +2883,7 @@ window.loadFromFile = loadFromFile;
 let sopRequests = [];
 
 async function loadRequestsMerged() {
-    if (typeof window.loadRequestsFromSharedAPI === 'function' && useSharedApiForData()) {
+    if (typeof window.loadRequestsFromSharedAPI === 'function') {
         try {
             const cloud = await window.loadRequestsFromSharedAPI();
             const local = JSON.parse(localStorage.getItem('sopRequests') || '[]');
@@ -2952,7 +2954,7 @@ window._submitSopRequestImpl = async function submitSopRequest(event) {
         console.log('Current requests in storage:', requests.length);
         requests.push(request);
         localStorage.setItem('sopRequests', JSON.stringify(requests));
-        if (typeof window.saveRequestsToSharedAPI === 'function' && useSharedApiForData()) {
+        if (typeof window.saveRequestsToSharedAPI === 'function') {
             try { await window.saveRequestsToSharedAPI(requests); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
         }
         sopRequests = requests;
@@ -3164,7 +3166,7 @@ async function markRequestStatus(requestId, status) {
         if (index !== -1) {
             requests[index].status = status;
             localStorage.setItem('sopRequests', JSON.stringify(requests));
-            if (typeof window.saveRequestsToSharedAPI === 'function' && useSharedApiForData()) {
+            if (typeof window.saveRequestsToSharedAPI === 'function') {
                 try { await window.saveRequestsToSharedAPI(requests); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
             }
             sopRequests = requests;
@@ -3182,7 +3184,7 @@ function deleteRequest(requestId) {
                 const requests = JSON.parse(localStorage.getItem('sopRequests') || '[]');
                 const filtered = requests.filter(r => r.id !== requestId);
                 localStorage.setItem('sopRequests', JSON.stringify(filtered));
-                if (typeof window.saveRequestsToSharedAPI === 'function' && useSharedApiForData()) {
+                if (typeof window.saveRequestsToSharedAPI === 'function') {
                     try { await window.saveRequestsToSharedAPI(filtered); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
                 }
                 sopRequests = filtered;
@@ -4652,7 +4654,7 @@ function useSharedApiForData() {
 
 async function loadUsersMerged() {
     let users = [];
-    if (typeof window.loadUsersFromSharedAPI === 'function' && useSharedApiForData()) {
+    if (typeof window.loadUsersFromSharedAPI === 'function') {
         try {
             users = await window.loadUsersFromSharedAPI();
         } catch (e) { console.warn('Users load from cloud failed:', e.message); }
@@ -4661,7 +4663,8 @@ async function loadUsersMerged() {
             const seen = new Set((users || []).map(u => (u.email || '').toLowerCase()));
             (local || []).forEach(u => { if (u && u.email && !seen.has((u.email || '').toLowerCase())) { users.push(u); seen.add((u.email || '').toLowerCase()); } });
         } catch (_) {}
-    } else {
+    }
+    if (!Array.isArray(users) || users.length === 0) {
         try { users = JSON.parse(localStorage.getItem('sopUsers') || '[]'); } catch (_) { users = []; }
     }
     usersCache = Array.isArray(users) ? users : [];
@@ -4679,7 +4682,7 @@ function getUsers() {
 
 async function saveUsers(users) {
     const arr = Array.isArray(users) ? users : [];
-    if (typeof window.saveUsersToSharedAPI === 'function' && useSharedApiForData()) {
+    if (typeof window.saveUsersToSharedAPI === 'function') {
         try {
             await window.saveUsersToSharedAPI(arr);
         } catch (e) {
