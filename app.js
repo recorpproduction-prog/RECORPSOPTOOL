@@ -243,12 +243,49 @@ window.openEmailSettings = async function() {
 
 console.log('🔍 DIAG: Global function stubs set');
 
-// Backend URL for users/requests sync – works on all devices (no dependency on shared-sop-api.js load order)
+// Single source of truth: backend URL. Same on every device so Users, Requests, Register, Under Review stay in sync.
 var DEFAULT_BACKEND = 'https://sop-backend-1065392834988.us-central1.run.app';
 function getSharedApiBase() {
     var url = (typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl || ''));
-    if (!url) url = DEFAULT_BACKEND;
-    return (url && typeof url === 'string') ? url.replace(/\/$/, '') : '';
+    if (!url || typeof url !== 'string') url = DEFAULT_BACKEND;
+    url = url.trim().replace(/\/$/, '');
+    if (!/^https?:\/\//i.test(url)) url = DEFAULT_BACKEND;
+    return url;
+}
+// One sync: fetch users + requests from backend, update state and localStorage. Server is source of truth.
+function syncSharedData() {
+    var base = getSharedApiBase();
+    if (!base) return Promise.resolve();
+    var usersPromise = fetchBackend('/users', { method: 'GET', headers: { Accept: 'application/json' } }, 15000)
+        .then(function (r) { return r.ok ? r.json() : { users: [] }; })
+        .then(function (d) { return (d && d.users) ? d.users : []; })
+        .catch(function () { return []; });
+    var requestsPromise = fetchBackend('/requests', { method: 'GET', headers: { Accept: 'application/json' } }, 15000)
+        .then(function (r) { return r.ok ? r.json() : { requests: [] }; })
+        .then(function (d) { return (d && d.requests) ? d.requests : []; })
+        .catch(function () { return []; });
+    return Promise.all([usersPromise, requestsPromise]).then(function (results) {
+        var cloudUsers = Array.isArray(results[0]) ? results[0] : [];
+        var cloudRequests = Array.isArray(results[1]) ? results[1] : [];
+        var localUsers = [];
+        try { localUsers = JSON.parse(localStorage.getItem('sopUsers') || '[]'); } catch (_) {}
+        var seen = new Set(cloudUsers.map(function (u) { return (u.email || '').toLowerCase(); }));
+        localUsers.forEach(function (u) {
+            if (u && u.email && !seen.has((u.email || '').toLowerCase())) {
+                cloudUsers.push(u);
+                seen.add((u.email || '').toLowerCase());
+            }
+        });
+        usersCache = cloudUsers;
+        try { localStorage.setItem('sopUsers', JSON.stringify(usersCache)); } catch (_) {}
+        var localReqs = [];
+        try { localReqs = JSON.parse(localStorage.getItem('sopRequests') || '[]'); } catch (_) {}
+        var byId = {};
+        cloudRequests.forEach(function (r) { if (r && r.id) byId[r.id] = r; });
+        localReqs.forEach(function (r) { if (r && r.id && !byId[r.id]) byId[r.id] = r; });
+        sopRequests = Object.keys(byId).map(function (k) { return byId[k]; }).sort(function (a, b) { return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); });
+        try { localStorage.setItem('sopRequests', JSON.stringify(sopRequests)); } catch (_) {}
+    }).catch(function () {});
 }
 // Try primary path; if 404, try /api/ path (for proxies)
 function fetchBackend(path, opts, ms) {
@@ -388,15 +425,18 @@ document.addEventListener('DOMContentLoaded', async function() {
         driveBtn.style.display = 'none';
     }
     
-    // Preload shared users and requests from backend on all devices (direct fetch in app.js – no dependency on shared-sop-api.js)
-    if (typeof loadUsersMerged === 'function') loadUsersMerged().catch(function () {});
-    if (typeof loadRequestsMerged === 'function') loadRequestsMerged().catch(function () {});
-    // One retry after 3s for slow mobile so users/requests appear even on first load
-    if (getSharedApiBase()) {
+    // Single sync: users + requests from backend so every device shows the same data
+    if (typeof syncSharedData === 'function') {
+        syncSharedData().then(function () {
+            if (typeof refreshRequestsList === 'function') refreshRequestsList();
+            if (typeof refreshUsersList === 'function') refreshUsersList();
+        }).catch(function () {});
         setTimeout(function () {
-            if (typeof loadUsersMerged === 'function') loadUsersMerged().then(function () { if (typeof refreshUsersList === 'function') refreshUsersList(); }).catch(function () {});
-            if (typeof loadRequestsMerged === 'function') loadRequestsMerged().then(function () { if (typeof refreshRequestsList === 'function') refreshRequestsList(); }).catch(function () {});
-        }, 3000);
+            if (typeof syncSharedData === 'function') syncSharedData().then(function () {
+                if (typeof refreshRequestsList === 'function') refreshRequestsList();
+                if (typeof refreshUsersList === 'function') refreshUsersList();
+            }).catch(function () {});
+        }, 2500);
     }
     
     // Load last draft SOP from storage on page load (only on initial page load, not when switching tabs)
@@ -458,7 +498,9 @@ function confirmAction(result) {
 
 function sanitizeUserMessage(msg) {
     if (!msg || typeof msg !== 'string') return msg;
-    if (/Server returned|^\d{3}\s|not found|endpoint_not_found|"error"|Failed to load|Cannot reach/i.test(msg)) return 'Cannot reach SOP server. Check internet and backend URL.';
+    var s = msg.trim();
+    if (/Server returned|^\d{3}\s|endpoint_not_found|Failed to load|Cannot reach/i.test(s)) return 'Cannot reach SOP server. Check internet and backend URL.';
+    if (/not\s+found|"error"|error"\s*:\s*"Not found|Not found\s*"|^\s*\{.*error/i.test(s)) return 'Cannot reach SOP server. Check internet and backend URL.';
     return msg;
 }
 function showNotification(message, type = 'info') {
@@ -2553,13 +2595,15 @@ window._switchTabImpl = function switchTab(tabName) {
         refreshProgressTracker();
         refreshTasksList();
     } else if (tabName === 'users') {
-        loadUsersMerged().then(() => {
+        syncSharedData().then(function () {
             refreshUsersList();
             populateUserDropdown();
-            populateAllReviewerDropdowns();
+            if (typeof populateAllReviewerDropdowns === 'function') populateAllReviewerDropdowns();
         });
     } else if (tabName === 'editor') {
-        loadUsersMerged().then(() => populateUserDropdown());
+        syncSharedData().then(function () {
+            if (typeof populateUserDropdown === 'function') populateUserDropdown();
+        });
     }
     
     // Show/hide floating save button
@@ -3045,11 +3089,10 @@ function clearRequestForm() {
 
 async function refreshRequestsList() {
     try {
-        await loadRequestsMerged();
+        await syncSharedData();
         filterRequests();
     } catch (e) {
-        console.error('Error loading requests:', e);
-        renderRequestsList([]);
+        filterRequests();
     }
 }
 
