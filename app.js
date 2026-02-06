@@ -271,13 +271,19 @@ function getGitHubSyncRepo() {
 function getGitHubSyncToken() {
     try { return (localStorage.getItem('sop_github_sync_token') || '').trim(); } catch (_) { return ''; }
 }
-// Fetch from GitHub raw URL - no auth, works on all devices for public repos
+// Fetch from GitHub raw URL - no auth. Tries main then master for branch.
 function fetchGitHubRaw(path) {
     var r = getGitHubSyncRepo();
-    var url = 'https://raw.githubusercontent.com/' + r.owner + '/' + r.repo + '/main/' + path + '?t=' + Date.now();
-    return fetch(url, { method: 'GET', mode: 'cors' }).then(function (res) {
-        return res.ok ? res.json() : null;
-    }).catch(function () { return null; });
+    function tryBranch(branch) {
+        var url = 'https://raw.githubusercontent.com/' + r.owner + '/' + r.repo + '/' + branch + '/' + path + '?t=' + Date.now();
+        return fetch(url, { method: 'GET', mode: 'cors' }).then(function (res) {
+            return res.ok ? res.json() : null;
+        }).catch(function () { return null; });
+    }
+    return tryBranch('main').then(function (data) {
+        if (data != null) return data;
+        return tryBranch('master');
+    });
 }
 // Write to GitHub via API - needs token in localStorage
 function saveToGitHub(path, content, message) {
@@ -294,31 +300,31 @@ function saveToGitHub(path, content, message) {
         })
         .then(function (res) { if (!res.ok) throw new Error('GitHub write failed'); });
 }
-// One sync: try Cloud Run first, then GitHub raw URLs. Works without Cloud Run deployment.
+// One sync: fetch from Cloud Run AND GitHub in parallel, use whichever has data so phone always gets something.
 function syncSharedData() {
     var base = getSharedApiBase();
-    var tryCloud = base ? Promise.all([
-        fetchBackend('/users', { method: 'GET', headers: { Accept: 'application/json' } }, 12000)
+    var cloudPromise = base ? Promise.all([
+        fetchBackend('/users', { method: 'GET', headers: { Accept: 'application/json' } }, 8000)
             .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
-        fetchBackend('/requests', { method: 'GET', headers: { Accept: 'application/json' } }, 12000)
+        fetchBackend('/requests', { method: 'GET', headers: { Accept: 'application/json' } }, 8000)
             .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
     ]) : Promise.resolve([null, null]);
-    return tryCloud.then(function (results) {
-        var cloudUsers = (results[0] && results[0].users) ? results[0].users : null;
-        var cloudRequests = (results[1] && results[1].requests) ? results[1].requests : null;
-        var cloudFailed = !results[0] && !results[1];
-        if (cloudFailed) {
-            return Promise.all([
-                fetchGitHubRaw('_sop-users.json'),
-                fetchGitHubRaw('_sop-requests.json')
-            ]).then(function (gh) {
-                cloudUsers = (gh[0] && gh[0].users) ? gh[0].users : (Array.isArray(gh[0]) ? gh[0] : []);
-                cloudRequests = (gh[1] && gh[1].requests) ? gh[1].requests : (Array.isArray(gh[1]) ? gh[1] : []);
-                return applySync(cloudUsers, cloudRequests);
-            }).catch(function () { return applySync([], []); });
-        }
-        return applySync(cloudUsers || [], cloudRequests || []);
-    }).then(function () {}).catch(function () { applySync([], []); });
+    var ghPromise = Promise.all([
+        fetchGitHubRaw('_sop-users.json'),
+        fetchGitHubRaw('_sop-requests.json')
+    ]).catch(function () { return [null, null]; });
+    return Promise.all([cloudPromise, ghPromise]).then(function (both) {
+        var cloud = both[0], gh = both[1];
+        var cloudUsers = (cloud[0] && cloud[0].users) ? cloud[0].users : null;
+        var cloudRequests = (cloud[1] && cloud[1].requests) ? cloud[1].requests : null;
+        var ghUsers = (gh[0] && gh[0].users) ? gh[0].users : (Array.isArray(gh[0]) ? gh[0] : null);
+        var ghRequests = (gh[1] && gh[1].requests) ? gh[1].requests : (Array.isArray(gh[1]) ? gh[1] : null);
+        var users = Array.isArray(cloudUsers) && cloudUsers.length > 0 ? cloudUsers : (Array.isArray(ghUsers) ? ghUsers : []);
+        var requests = Array.isArray(cloudRequests) && cloudRequests.length > 0 ? cloudRequests : (Array.isArray(ghRequests) ? ghRequests : []);
+        if (users.length === 0 && Array.isArray(ghUsers)) users = ghUsers;
+        if (requests.length === 0 && Array.isArray(ghRequests)) requests = ghRequests;
+        applySync(users, requests);
+    }).catch(function () { applySync([], []); });
 }
 function applySync(cloudUsers, cloudRequests) {
     cloudUsers = Array.isArray(cloudUsers) ? cloudUsers : [];

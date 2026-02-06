@@ -1,1 +1,14 @@
-{"requests":[]}
+{
+  "requests": [
+    {
+      "id": "req-sample-1",
+      "title": "Sample SOP Request",
+      "department": "Production",
+      "submitter": "Team",
+      "priority": "Medium",
+      "description": "Example pending request – edit or add new ones via the form.",
+      "status": "Pending",
+      "submittedAt": "2025-01-01T12:00:00.000Z"
+    }
+  ]
+}

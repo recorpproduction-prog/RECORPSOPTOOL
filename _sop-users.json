@@ -1,1 +1,9 @@
-{"users":[]}
+{
+  "users": [
+    {
+      "firstName": "Admin",
+      "lastName": "User",
+      "email": "recorpproduction@gmail.com"
+    }
+  ]
+}
