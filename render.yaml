@@ -1,0 +1,15 @@
+# Render.com Blueprint (optional - or use manual setup in Dashboard)
+# If this causes issues, ignore it and set Build/Start commands manually
+
+services:
+  - type: web
+    name: pallet-ticket-capture
+    runtime: python
+
+    buildCommand: pip install -r requirements_web.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 120 web_app:app
+
+    envVars:
+      - key: OCR_PROVIDER
+        value: ocrspace
+      # Add in Dashboard: GOOGLE_SHEET_ID, GOOGLE_CREDENTIALS_JSON (or Secret File)
