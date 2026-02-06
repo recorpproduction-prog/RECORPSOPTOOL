@@ -243,6 +243,39 @@ window.openEmailSettings = async function() {
 
 console.log('🔍 DIAG: Global function stubs set');
 
+// Backend URL for users/requests sync – works on all devices (no dependency on shared-sop-api.js load order)
+function getSharedApiBase() {
+    var url = (typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl || ''));
+    if (!url) url = 'https://sop-backend-1065392834988.us-central1.run.app';
+    return (url && typeof url === 'string') ? url.replace(/\/$/, '') : '';
+}
+function fetchWithTimeout(url, opts, ms) {
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var t = setTimeout(function () { if (ctrl) ctrl.abort(); }, ms || 20000);
+    var signal = ctrl ? ctrl.signal : undefined;
+    return fetch(url, Object.assign({ mode: 'cors', credentials: 'omit', signal: signal }, opts || {})).then(function (r) {
+        clearTimeout(t);
+        return r;
+    }, function (err) {
+        clearTimeout(t);
+        throw err;
+    });
+}
+async function saveRequestsToCloud(requests) {
+    var base = getSharedApiBase();
+    if (!base) {
+        if (typeof window.saveRequestsToSharedAPI === 'function') { try { await window.saveRequestsToSharedAPI(requests); } catch (e) { console.warn('Save requests to cloud failed:', e.message); } }
+        return;
+    }
+    try {
+        var r = await fetchWithTimeout(base + '/requests', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ requests: requests || [] }) }, 15000);
+        if (!r.ok) throw new Error(r.status + ' ' + (await r.text()));
+    } catch (e) {
+        if (typeof window.saveRequestsToSharedAPI === 'function') { try { await window.saveRequestsToSharedAPI(requests); } catch (e2) { console.warn('Save requests to cloud failed:', e.message || e2.message); } }
+        else { console.warn('Save requests to cloud failed:', e.message); }
+    }
+}
+
 // Cloud SOPs: shared API (no OAuth for staff) or Google Drive (Connect per device)
 function useCloudSops() {
     return (typeof window.useSharedAccess === 'function' && window.useSharedAccess()) ||
@@ -345,12 +378,15 @@ document.addEventListener('DOMContentLoaded', async function() {
         driveBtn.style.display = 'none';
     }
     
-    // Preload shared users and requests from Drive/backend on all devices (always try when API exists)
-    if (typeof loadUsersFromSharedAPI === 'function' || typeof loadUsersMerged === 'function') {
-        if (typeof loadUsersMerged === 'function') loadUsersMerged().catch(() => {});
-    }
-    if (typeof loadRequestsFromSharedAPI === 'function' || typeof loadRequestsMerged === 'function') {
-        if (typeof loadRequestsMerged === 'function') loadRequestsMerged().catch(() => {});
+    // Preload shared users and requests from backend on all devices (direct fetch in app.js – no dependency on shared-sop-api.js)
+    if (typeof loadUsersMerged === 'function') loadUsersMerged().catch(function () {});
+    if (typeof loadRequestsMerged === 'function') loadRequestsMerged().catch(function () {});
+    // One retry after 3s for slow mobile so users/requests appear even on first load
+    if (getSharedApiBase()) {
+        setTimeout(function () {
+            if (typeof loadUsersMerged === 'function') loadUsersMerged().then(function () { if (typeof refreshUsersList === 'function') refreshUsersList(); }).catch(function () {});
+            if (typeof loadRequestsMerged === 'function') loadRequestsMerged().then(function () { if (typeof refreshRequestsList === 'function') refreshRequestsList(); }).catch(function () {});
+        }, 3000);
     }
     
     // Load last draft SOP from storage on page load (only on initial page load, not when switching tabs)
@@ -2883,19 +2919,36 @@ window.loadFromFile = loadFromFile;
 let sopRequests = [];
 
 async function loadRequestsMerged() {
-    if (typeof window.loadRequestsFromSharedAPI === 'function') {
+    var base = getSharedApiBase();
+    if (base) {
         try {
-            const cloud = await window.loadRequestsFromSharedAPI();
-            const local = JSON.parse(localStorage.getItem('sopRequests') || '[]');
-            const byId = {};
-            (cloud || []).forEach(r => { if (r && r.id) byId[r.id] = r; });
-            (local || []).forEach(r => { if (r && r.id && !byId[r.id]) byId[r.id] = r; });
-            const merged = Object.values(byId).sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+            var res = await fetchWithTimeout(base + '/requests', { method: 'GET', headers: { Accept: 'application/json' } }, 20000);
+            var cloud = res.ok ? (await res.json()).requests : [];
+            if (!Array.isArray(cloud) && typeof window.loadRequestsFromSharedAPI === 'function') {
+                try { cloud = await window.loadRequestsFromSharedAPI(); } catch (_) { cloud = []; }
+            }
+            cloud = Array.isArray(cloud) ? cloud : [];
+            var local = JSON.parse(localStorage.getItem('sopRequests') || '[]');
+            var byId = {};
+            cloud.forEach(function (r) { if (r && r.id) byId[r.id] = r; });
+            local.forEach(function (r) { if (r && r.id && !byId[r.id]) byId[r.id] = r; });
+            var merged = Object.keys(byId).map(function (k) { return byId[k]; }).sort(function (a, b) { return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); });
             sopRequests = merged;
             try { localStorage.setItem('sopRequests', JSON.stringify(merged)); } catch (_) {}
             return merged;
         } catch (e) {
-            console.warn('Requests load from cloud failed:', e.message);
+            if (typeof window.loadRequestsFromSharedAPI === 'function') {
+                try {
+                    var c = await window.loadRequestsFromSharedAPI();
+                    var loc = JSON.parse(localStorage.getItem('sopRequests') || '[]');
+                    var byId2 = {};
+                    (c || []).forEach(function (r) { if (r && r.id) byId2[r.id] = r; });
+                    loc.forEach(function (r) { if (r && r.id && !byId2[r.id]) byId2[r.id] = r; });
+                    sopRequests = Object.keys(byId2).map(function (k) { return byId2[k]; }).sort(function (a, b) { return new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0); });
+                    return sopRequests;
+                } catch (_) {}
+            }
+            console.warn('Requests cloud load failed:', e.message);
         }
     }
     sopRequests = JSON.parse(localStorage.getItem('sopRequests') || '[]');
@@ -2954,9 +3007,7 @@ window._submitSopRequestImpl = async function submitSopRequest(event) {
         console.log('Current requests in storage:', requests.length);
         requests.push(request);
         localStorage.setItem('sopRequests', JSON.stringify(requests));
-        if (typeof window.saveRequestsToSharedAPI === 'function') {
-            try { await window.saveRequestsToSharedAPI(requests); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
-        }
+        await saveRequestsToCloud(requests);
         sopRequests = requests;
         console.log('Request saved. Total requests:', requests.length);
         
@@ -3166,9 +3217,7 @@ async function markRequestStatus(requestId, status) {
         if (index !== -1) {
             requests[index].status = status;
             localStorage.setItem('sopRequests', JSON.stringify(requests));
-            if (typeof window.saveRequestsToSharedAPI === 'function') {
-                try { await window.saveRequestsToSharedAPI(requests); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
-            }
+            await saveRequestsToCloud(requests);
             sopRequests = requests;
             refreshRequestsList();
         }
@@ -3184,9 +3233,7 @@ function deleteRequest(requestId) {
                 const requests = JSON.parse(localStorage.getItem('sopRequests') || '[]');
                 const filtered = requests.filter(r => r.id !== requestId);
                 localStorage.setItem('sopRequests', JSON.stringify(filtered));
-                if (typeof window.saveRequestsToSharedAPI === 'function') {
-                    try { await window.saveRequestsToSharedAPI(filtered); } catch (e) { console.warn('Save requests to cloud failed:', e.message); }
-                }
+                await saveRequestsToCloud(filtered);
                 sopRequests = filtered;
                 refreshRequestsList();
                 showNotification('Request deleted.', 'success');
@@ -4653,15 +4700,27 @@ function useSharedApiForData() {
 }
 
 async function loadUsersMerged() {
-    let users = [];
-    if (typeof window.loadUsersFromSharedAPI === 'function') {
+    var users = [];
+    var base = getSharedApiBase();
+    if (base) {
         try {
-            users = await window.loadUsersFromSharedAPI();
-        } catch (e) { console.warn('Users load from cloud failed:', e.message); }
+            var r = await fetchWithTimeout(base + '/users', { method: 'GET', headers: { Accept: 'application/json' } }, 20000);
+            var data = r.ok ? await r.json() : {};
+            users = (data && data.users) ? data.users : [];
+        } catch (e) {
+            if (typeof window.loadUsersFromSharedAPI === 'function') {
+                try { users = await window.loadUsersFromSharedAPI(); } catch (e2) { console.warn('Users cloud load failed:', e.message || e2.message); }
+            } else { console.warn('Users cloud load failed:', e.message); }
+        }
         try {
-            const local = JSON.parse(localStorage.getItem('sopUsers') || '[]');
-            const seen = new Set((users || []).map(u => (u.email || '').toLowerCase()));
-            (local || []).forEach(u => { if (u && u.email && !seen.has((u.email || '').toLowerCase())) { users.push(u); seen.add((u.email || '').toLowerCase()); } });
+            var local = JSON.parse(localStorage.getItem('sopUsers') || '[]');
+            var seen = new Set((users || []).map(function (u) { return (u.email || '').toLowerCase(); }));
+            (local || []).forEach(function (u) {
+                if (u && u.email && !seen.has((u.email || '').toLowerCase())) {
+                    users.push(u);
+                    seen.add((u.email || '').toLowerCase());
+                }
+            });
         } catch (_) {}
     }
     if (!Array.isArray(users) || users.length === 0) {
@@ -4681,13 +4740,19 @@ function getUsers() {
 }
 
 async function saveUsers(users) {
-    const arr = Array.isArray(users) ? users : [];
-    if (typeof window.saveUsersToSharedAPI === 'function') {
+    var arr = Array.isArray(users) ? users : [];
+    var base = getSharedApiBase();
+    if (base) {
         try {
-            await window.saveUsersToSharedAPI(arr);
+            var r = await fetchWithTimeout(base + '/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ users: arr }) }, 15000);
+            if (!r.ok) throw new Error(r.status + ' ' + (await r.text()));
         } catch (e) {
-            showNotification('Users not synced to cloud: ' + (e.message || 'Check connection'), 'warning');
+            if (typeof window.saveUsersToSharedAPI === 'function') {
+                try { await window.saveUsersToSharedAPI(arr); } catch (e2) { showNotification('Users not synced to cloud: ' + (e.message || e2.message), 'warning'); }
+            } else { showNotification('Users not synced to cloud: ' + (e.message || 'Check connection'), 'warning'); }
         }
+    } else if (typeof window.saveUsersToSharedAPI === 'function') {
+        try { await window.saveUsersToSharedAPI(arr); } catch (e) { showNotification('Users not synced to cloud: ' + (e.message || 'Check connection'), 'warning'); }
     }
     try {
         localStorage.setItem('sopUsers', JSON.stringify(arr));
