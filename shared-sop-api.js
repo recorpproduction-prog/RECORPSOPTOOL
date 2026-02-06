@@ -30,9 +30,11 @@
                 signal: ctrl ? ctrl.signal : undefined
             });
             clearTimeout(timeout);
+            if (res.status === 404) { return {}; }
             const data = res.ok ? await res.json() : (await res.text().then(t => { try { return JSON.parse(t); } catch (_) { return {}; } }));
             if (!res.ok) {
-                const msg = (data && data.error) ? data.error : (res.statusText || 'Failed to load SOPs');
+                const raw = (data && data.error) ? data.error : (res.statusText || 'Failed to load SOPs');
+                const msg = /not found|endpoint_not_found/i.test(String(raw)) ? 'Cannot reach SOP server. Check URL and connection.' : raw;
                 throw new Error(msg);
             }
             const sops = data.sops || data;
@@ -56,9 +58,11 @@
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                 body: JSON.stringify(sop)
             });
+            if (res.status === 404) { return false; }
             const data = res.ok ? null : (await res.text().then(t => { try { return JSON.parse(t); } catch (_) { return {}; } }));
             if (!res.ok) {
-                const msg = (data && data.error) ? data.error : (res.statusText || 'Failed to save SOP');
+                const raw = (data && data.error) ? data.error : (res.statusText || 'Failed to save SOP');
+                const msg = /not found|endpoint_not_found/i.test(String(raw)) ? 'Cannot reach SOP server.' : raw;
                 throw new Error(msg);
             }
             return true;
@@ -86,6 +90,7 @@
                     const data = text ? JSON.parse(text) : {};
                     if (data.error && typeof data.error === 'string') msg = data.error;
                 } catch (_) { /* use msg as-is */ }
+                if (/not found|endpoint_not_found/i.test(String(msg))) msg = 'Cannot reach SOP server.';
                 throw new Error(msg);
             }
             return true;

@@ -282,7 +282,7 @@ async function saveRequestsToCloud(requests) {
     }
     try {
         var r = await fetchBackend('/requests', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ requests: requests || [] }) }, 15000);
-        if (!r.ok) throw new Error('Server returned ' + r.status + (r.status === 404 ? ' (check backend URL)' : ''));
+        if (!r.ok) throw new Error('Cannot reach server. Check internet and backend URL.');
     } catch (e) {
         if (typeof window.saveRequestsToSharedAPI === 'function') { try { await window.saveRequestsToSharedAPI(requests); } catch (e2) { console.warn('Save requests to cloud failed:', e.message || e2.message); } }
         else { console.warn('Save requests to cloud failed:', e.message); }
@@ -343,15 +343,18 @@ async function loadAllSopsMerged() {
     let cloudError = null;
     if (typeof loadAllSopsFromCloud === 'function' && useCloudSops()) {
         try {
-            const loaded = await loadAllSopsFromCloud();
+            var loaded = await loadAllSopsFromCloud();
             savedSops = loaded || {};
         } catch (e) {
             cloudError = e;
             console.warn('Cloud load failed:', e.message);
         }
-        const local = JSON.parse(localStorage.getItem('savedSops') || '{}');
-        Object.keys(local).forEach(key => { if (local[key] && local[key].meta && !savedSops[key]) savedSops[key] = local[key]; });
-        if (cloudError && Object.keys(savedSops).length === 0) throw cloudError;
+        var local = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        Object.keys(local).forEach(function (key) { if (local[key] && local[key].meta && !savedSops[key]) savedSops[key] = local[key]; });
+        if (cloudError && Object.keys(savedSops).length === 0) {
+            if (/not found|endpoint_not_found|cannot reach/i.test(cloudError.message || '')) { return savedSops; }
+            throw cloudError;
+        }
     } else {
         savedSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
     }
@@ -453,11 +456,16 @@ function confirmAction(result) {
     document.getElementById('confirmationDialog').classList.add('hidden');
 }
 
+function sanitizeUserMessage(msg) {
+    if (!msg || typeof msg !== 'string') return msg;
+    if (/Server returned|^\d{3}\s|not found|endpoint_not_found|"error"|Failed to load|Cannot reach/i.test(msg)) return 'Cannot reach SOP server. Check internet and backend URL.';
+    return msg;
+}
 function showNotification(message, type = 'info') {
-    const toast = document.getElementById('notificationToast');
-    const messageEl = document.getElementById('notificationMessage');
-    
-    messageEl.textContent = message;
+    var toast = document.getElementById('notificationToast');
+    var messageEl = document.getElementById('notificationMessage');
+    var text = typeof message === 'string' ? sanitizeUserMessage(message) : String(message);
+    messageEl.textContent = text;
     toast.className = `notification-toast ${type}`;
     toast.classList.remove('hidden');
     
@@ -1517,11 +1525,11 @@ async function showLoadSection() {
         try {
             savedSops = await loadAllSopsMerged();
         } catch (error) {
-            const msg = error.message || 'Check connection.';
+            var msg = sanitizeUserMessage(error.message || 'Check connection.');
             list.innerHTML = '<p>Error loading SOPs: ' + escapeHtml(msg) + '</p>';
-            const banner = document.getElementById('connectionErrorBanner');
-            const textEl = document.getElementById('connectionErrorText');
-            if (banner && textEl) { textEl.textContent = msg; banner.style.display = ''; }
+            var banner = document.getElementById('connectionErrorBanner');
+            var textEl = document.getElementById('connectionErrorText');
+            if (banner && textEl) { textEl.textContent = sanitizeUserMessage(msg); banner.style.display = ''; }
             return;
         }
         if (Object.keys(savedSops).length === 0 && !useCloudSops()) {
@@ -2591,8 +2599,7 @@ async function refreshRegister() {
             savedSops = await loadAllSopsMerged();
         } catch (error) {
             renderRegisterTable([]);
-            var msg = error.message || 'Check connection.';
-            if (/^\d+\s*\{|"error"|not found|endpoint_not_found/i.test(msg)) msg = 'Cannot reach SOP server. Check internet and backend URL.';
+            var msg = sanitizeUserMessage(error.message || 'Check connection.');
             showNotification('Could not load SOPs: ' + msg, 'error');
             var banner = document.getElementById('connectionErrorBanner');
             var textEl = document.getElementById('connectionErrorText');
@@ -3349,8 +3356,7 @@ async function refreshReviewList() {
     } catch (e) {
         console.error('Error refreshing review list:', e);
         renderReviewList([]);
-        var msg = e.message || 'Check connection.';
-        if (/^\d+\s*\{|"error"|not found|endpoint_not_found/i.test(msg)) msg = 'Cannot reach SOP server. Check internet and backend URL.';
+        var msg = sanitizeUserMessage(e.message || 'Check connection.');
         showNotification('Could not load SOPs: ' + msg, 'error');
         var banner = document.getElementById('connectionErrorBanner');
         var textEl = document.getElementById('connectionErrorText');
@@ -4758,7 +4764,7 @@ async function saveUsers(users) {
     if (base) {
         try {
             var r = await fetchBackend('/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ users: arr }) }, 15000);
-            if (!r.ok) throw new Error('Server returned ' + r.status + (r.status === 404 ? ' (check backend URL)' : ''));
+            if (!r.ok) throw new Error('Cannot reach server. Check internet and backend URL.');
         } catch (e) {
             if (typeof window.saveUsersToSharedAPI === 'function') {
                 try { await window.saveUsersToSharedAPI(arr); } catch (e2) { showNotification('Users not synced to cloud: ' + (e.message || e2.message), 'warning'); }

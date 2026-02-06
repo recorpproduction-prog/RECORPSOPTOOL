@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SOP Backend Test</title>
+    <style>
+        body { font-family: system-ui, sans-serif; padding: 1rem; max-width: 600px; margin: 0 auto; }
+        h1 { font-size: 1.25rem; }
+        .url { word-break: break-all; font-size: 0.85rem; color: #666; }
+        .result { margin: 0.75rem 0; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; }
+        .ok { border-color: #0a0; background: #f0fff0; }
+        .fail { border-color: #c00; background: #fff0f0; }
+        pre { margin: 0.5rem 0 0; font-size: 0.75rem; overflow: auto; white-space: pre-wrap; }
+        button { padding: 0.5rem 1rem; margin-top: 0.5rem; }
+    </style>
+</head>
+<body>
+    <h1>SOP Backend connection test</h1>
+    <p>Use this page on your phone or desktop to see exactly what the backend returns. Same URL the app uses.</p>
+    <p class="url" id="baseUrl">Loading...</p>
+    <div id="results"></div>
+    <button onclick="run()">Test again</button>
+    <script>
+        var BASE = (typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl)) || 'https://sop-backend-1065392834988.us-central1.run.app';
+        BASE = (BASE && typeof BASE === 'string') ? BASE.replace(/\/$/, '') : '';
+
+        function out(html) {
+            document.getElementById('results').innerHTML += html;
+        }
+        function clear() {
+            document.getElementById('results').innerHTML = '';
+        }
+        function run() {
+            clear();
+            document.getElementById('baseUrl').textContent = 'Base URL: ' + (BASE || '(not set)');
+            if (!BASE) {
+                out('<div class="result fail"><strong>Root</strong>: No backend URL set.</div>');
+                return;
+            }
+            var endpoints = [
+                { path: '/', name: 'Root' },
+                { path: '/sops', name: 'SOPs list' },
+                { path: '/users', name: 'Users' },
+                { path: '/requests', name: 'Requests' }
+            ];
+            endpoints.forEach(function (ep) {
+                var url = BASE + ep.path;
+                var name = ep.name;
+                fetch(url, { method: 'GET', mode: 'cors', credentials: 'omit', headers: { Accept: 'application/json' } })
+                    .then(function (r) {
+                        return r.text().then(function (text) {
+                            var ok = r.ok;
+                            var body = text;
+                            try { body = JSON.stringify(JSON.parse(text), null, 2); } catch (_) {}
+                            var html = '<div class="result ' + (ok ? 'ok' : 'fail') + '">' +
+                                '<strong>' + name + '</strong> <span class="url">' + url + '</span><br>' +
+                                'Status: ' + r.status + ' ' + (r.statusText || '') + '<br>' +
+                                '<pre>' + (body || '(empty)').substring(0, 500) + '</pre></div>';
+                            out(html);
+                        });
+                    })
+                    .catch(function (err) {
+                        out('<div class="result fail"><strong>' + name + '</strong> ' + url + '<br>Error: ' + (err.message || err) + '</div>');
+                    });
+            });
+        }
+        run();
+    </script>
+</body>
+</html>
