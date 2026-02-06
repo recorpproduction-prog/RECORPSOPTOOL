@@ -244,10 +244,23 @@ window.openEmailSettings = async function() {
 console.log('🔍 DIAG: Global function stubs set');
 
 // Backend URL for users/requests sync – works on all devices (no dependency on shared-sop-api.js load order)
+var DEFAULT_BACKEND = 'https://sop-backend-1065392834988.us-central1.run.app';
 function getSharedApiBase() {
     var url = (typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl || ''));
-    if (!url) url = 'https://sop-backend-1065392834988.us-central1.run.app';
+    if (!url) url = DEFAULT_BACKEND;
     return (url && typeof url === 'string') ? url.replace(/\/$/, '') : '';
+}
+// Try primary path; if 404, try /api/ path (for proxies)
+function fetchBackend(path, opts, ms) {
+    var base = getSharedApiBase();
+    var url = base + path;
+    return fetchWithTimeout(url, opts, ms).then(function (r) {
+        if (r.status === 404 && path.indexOf('/api/') !== 0) {
+            var alt = base + '/api' + path;
+            return fetchWithTimeout(alt, opts, ms);
+        }
+        return r;
+    });
 }
 function fetchWithTimeout(url, opts, ms) {
     var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -268,8 +281,8 @@ async function saveRequestsToCloud(requests) {
         return;
     }
     try {
-        var r = await fetchWithTimeout(base + '/requests', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ requests: requests || [] }) }, 15000);
-        if (!r.ok) throw new Error(r.status + ' ' + (await r.text()));
+        var r = await fetchBackend('/requests', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ requests: requests || [] }) }, 15000);
+        if (!r.ok) throw new Error('Server returned ' + r.status + (r.status === 404 ? ' (check backend URL)' : ''));
     } catch (e) {
         if (typeof window.saveRequestsToSharedAPI === 'function') { try { await window.saveRequestsToSharedAPI(requests); } catch (e2) { console.warn('Save requests to cloud failed:', e.message || e2.message); } }
         else { console.warn('Save requests to cloud failed:', e.message); }
@@ -304,15 +317,9 @@ async function deleteSopFromCloud(sopId) {
 }
 
 async function testBackendConnection() {
-    let base = typeof window !== 'undefined' && (window.SOP_SHARED_API_URL || window.sopSharedApiUrl || '');
-    if (!base && typeof location !== 'undefined' && /github\.io$/i.test(location.hostname))
-        base = 'https://sop-backend-1065392834988.us-central1.run.app';
-    if (!base) return true;
+    if (!getSharedApiBase()) return true;
     try {
-        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        const timeout = setTimeout(() => ctrl && ctrl.abort(), 10000);
-        const res = await fetch(base.replace(/\/$/, '') + '/sops', { method: 'GET', mode: 'cors', credentials: 'omit', headers: { Accept: 'application/json' }, signal: ctrl ? ctrl.signal : undefined });
-        clearTimeout(timeout);
+        var res = await fetchBackend('/sops', { method: 'GET', headers: { Accept: 'application/json' } }, 10000);
         return res.ok;
     } catch (_) { return false; }
 }
@@ -2584,10 +2591,11 @@ async function refreshRegister() {
             savedSops = await loadAllSopsMerged();
         } catch (error) {
             renderRegisterTable([]);
-            const msg = error.message || 'Check connection.';
+            var msg = error.message || 'Check connection.';
+            if (/^\d+\s*\{|"error"|not found|endpoint_not_found/i.test(msg)) msg = 'Cannot reach SOP server. Check internet and backend URL.';
             showNotification('Could not load SOPs: ' + msg, 'error');
-            const banner = document.getElementById('connectionErrorBanner');
-            const textEl = document.getElementById('connectionErrorText');
+            var banner = document.getElementById('connectionErrorBanner');
+            var textEl = document.getElementById('connectionErrorText');
             if (banner && textEl) { textEl.textContent = msg; banner.style.display = ''; }
             return;
         }
@@ -2922,8 +2930,11 @@ async function loadRequestsMerged() {
     var base = getSharedApiBase();
     if (base) {
         try {
-            var res = await fetchWithTimeout(base + '/requests', { method: 'GET', headers: { Accept: 'application/json' } }, 20000);
-            var cloud = res.ok ? (await res.json()).requests : [];
+            var res = await fetchBackend('/requests', { method: 'GET', headers: { Accept: 'application/json' } }, 20000);
+            var cloud = [];
+            if (res.ok) {
+                try { var d = await res.json(); cloud = (d && d.requests) ? d.requests : []; } catch (_) {}
+            }
             if (!Array.isArray(cloud) && typeof window.loadRequestsFromSharedAPI === 'function') {
                 try { cloud = await window.loadRequestsFromSharedAPI(); } catch (_) { cloud = []; }
             }
@@ -3338,10 +3349,11 @@ async function refreshReviewList() {
     } catch (e) {
         console.error('Error refreshing review list:', e);
         renderReviewList([]);
-        const msg = e.message || 'Check connection.';
+        var msg = e.message || 'Check connection.';
+        if (/^\d+\s*\{|"error"|not found|endpoint_not_found/i.test(msg)) msg = 'Cannot reach SOP server. Check internet and backend URL.';
         showNotification('Could not load SOPs: ' + msg, 'error');
-        const banner = document.getElementById('connectionErrorBanner');
-        const textEl = document.getElementById('connectionErrorText');
+        var banner = document.getElementById('connectionErrorBanner');
+        var textEl = document.getElementById('connectionErrorText');
         if (banner && textEl) { textEl.textContent = msg; banner.style.display = ''; }
     }
 }
@@ -4704,8 +4716,9 @@ async function loadUsersMerged() {
     var base = getSharedApiBase();
     if (base) {
         try {
-            var r = await fetchWithTimeout(base + '/users', { method: 'GET', headers: { Accept: 'application/json' } }, 20000);
-            var data = r.ok ? await r.json() : {};
+            var r = await fetchBackend('/users', { method: 'GET', headers: { Accept: 'application/json' } }, 20000);
+            var data = {};
+            if (r.ok) { try { data = await r.json(); } catch (_) {} }
             users = (data && data.users) ? data.users : [];
         } catch (e) {
             if (typeof window.loadUsersFromSharedAPI === 'function') {
@@ -4744,8 +4757,8 @@ async function saveUsers(users) {
     var base = getSharedApiBase();
     if (base) {
         try {
-            var r = await fetchWithTimeout(base + '/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ users: arr }) }, 15000);
-            if (!r.ok) throw new Error(r.status + ' ' + (await r.text()));
+            var r = await fetchBackend('/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ users: arr }) }, 15000);
+            if (!r.ok) throw new Error('Server returned ' + r.status + (r.status === 404 ? ' (check backend URL)' : ''));
         } catch (e) {
             if (typeof window.saveUsersToSharedAPI === 'function') {
                 try { await window.saveUsersToSharedAPI(arr); } catch (e2) { showNotification('Users not synced to cloud: ' + (e.message || e2.message), 'warning'); }
