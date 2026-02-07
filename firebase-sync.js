@@ -29,6 +29,9 @@
             var auth = authMod.getAuth(firebaseApp);
             firestoreDb = fsMod.getFirestore(firebaseApp);
             storage = storageMod.getStorage(firebaseApp);
+            if (typeof storage.setMaxUploadRetryTime === 'function') {
+                storage.setMaxUploadRetryTime(5 * 60 * 1000);
+            }
             await authMod.signInAnonymously(auth);
             ready = true;
             console.log('Firebase sync ready – users, requests, SOPs and images sync across devices');
@@ -111,17 +114,23 @@
         for (var i = 0; i < processed.steps.length; i++) {
             var step = processed.steps[i];
             if (step.images && Array.isArray(step.images)) {
+                var newImages = [];
                 for (var j = 0; j < step.images.length; j++) {
                     var img = step.images[j];
                     if (typeof img === 'string' && img.indexOf('data:image') === 0) {
                         var path = IMAGES_PREFIX + sopId + '/step' + i + '_' + j + '.png';
                         try {
-                            step.images[j] = await uploadBase64ToStorage(img, path);
+                            var url = await uploadBase64ToStorage(img, path);
+                            newImages.push(url);
                         } catch (e) {
-                            console.warn('Image upload failed, keeping base64:', e.message);
+                            console.warn('Image upload failed (omitting to avoid Firestore size limit):', e.message);
+                            // Do not keep base64 – Firestore doc limit is 1MB; save still succeeds
                         }
+                    } else if (typeof img === 'string' && img.indexOf('http') === 0) {
+                        newImages.push(img);
                     }
                 }
+                step.images = newImages;
             }
         }
         return processed;

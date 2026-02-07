@@ -198,6 +198,11 @@ window.firebaseConfig = {
 - Double-check the Firestore rules (Step 4) – they must allow `request.auth != null`
 - Make sure Anonymous auth is enabled
 
+**"Image upload failed" or "Max retry time for operation exceeded" (storage/retry-limit-exceeded)**
+- Step images are uploaded to Firebase Storage. Slow or unstable networks can cause timeouts.
+- The app now omits failed images so the SOP still saves to Firestore (doc size limit 1MB). Approval and PDF generation will complete; some step images may be missing in the saved SOP.
+- For better success: use a stable connection, or use smaller images (the app will retry longer before giving up).
+
 ---
 
 ## What You Do vs. What Users Do
