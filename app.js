@@ -310,7 +310,7 @@ function syncSharedData() {
         applySync(u, r);
     }
     if (typeof window.useFirebaseSync === 'function' && window.useFirebaseSync()) {
-        Promise.all([
+        return Promise.all([
             typeof window.loadUsersFromFirebase === 'function' ? window.loadUsersFromFirebase() : Promise.resolve(null),
             typeof window.loadRequestsFromFirebase === 'function' ? window.loadRequestsFromFirebase() : Promise.resolve(null)
         ]).then(function (out) {
@@ -320,7 +320,7 @@ function syncSharedData() {
         }).catch(function () { fromLocal(); });
     } else if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive() &&
         typeof window.loadJsonFromDriveFolder === 'function') {
-        Promise.all([
+        return Promise.all([
             window.loadJsonFromDriveFolder('_sop-users.json'),
             window.loadJsonFromDriveFolder('_sop-requests.json')
         ]).then(function (out) {
@@ -330,6 +330,7 @@ function syncSharedData() {
         }).catch(function () { fromLocal(); });
     } else {
         fromLocal();
+        return Promise.resolve();
     }
 }
 function applySync(cloudUsers, cloudRequests) {
@@ -503,15 +504,19 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Single sync: users + requests from backend so every device shows the same data
     if (typeof syncSharedData === 'function') {
-        syncSharedData().then(function () {
+        var p = syncSharedData();
+        (p && typeof p.then === 'function' ? p : Promise.resolve()).then(function () {
             if (typeof refreshRequestsList === 'function') refreshRequestsList();
             if (typeof refreshUsersList === 'function') refreshUsersList();
         }).catch(function () {});
         setTimeout(function () {
-            if (typeof syncSharedData === 'function') syncSharedData().then(function () {
-                if (typeof refreshRequestsList === 'function') refreshRequestsList();
-                if (typeof refreshUsersList === 'function') refreshUsersList();
-            }).catch(function () {});
+            if (typeof syncSharedData === 'function') {
+                var p2 = syncSharedData();
+                (p2 && typeof p2.then === 'function' ? p2 : Promise.resolve()).then(function () {
+                    if (typeof refreshRequestsList === 'function') refreshRequestsList();
+                    if (typeof refreshUsersList === 'function') refreshUsersList();
+                }).catch(function () {});
+            }
         }, 2500);
     }
     
@@ -2671,13 +2676,15 @@ window._switchTabImpl = function switchTab(tabName) {
         refreshProgressTracker();
         refreshTasksList();
     } else if (tabName === 'users') {
-        syncSharedData().then(function () {
+        var sp = syncSharedData();
+        (sp && typeof sp.then === 'function' ? sp : Promise.resolve()).then(function () {
             refreshUsersList();
             populateUserDropdown();
             if (typeof populateAllReviewerDropdowns === 'function') populateAllReviewerDropdowns();
         });
     } else if (tabName === 'editor') {
-        syncSharedData().then(function () {
+        var sp2 = syncSharedData();
+        (sp2 && typeof sp2.then === 'function' ? sp2 : Promise.resolve()).then(function () {
             if (typeof populateUserDropdown === 'function') populateUserDropdown();
         });
     }
@@ -4531,10 +4538,13 @@ function saveSyncToken() {
     try { localStorage.setItem('sop_github_sync_token', token); } catch (_) {}
     closeSyncSettings();
     showNotification(token ? 'GitHub token saved. You can now save users and requests across devices.' : 'Token cleared.', 'success');
-    if (typeof syncSharedData === 'function') syncSharedData().then(function () {
-        if (typeof refreshUsersList === 'function') refreshUsersList();
-        if (typeof refreshRequestsList === 'function') refreshRequestsList();
-    });
+    if (typeof syncSharedData === 'function') {
+        var sp3 = syncSharedData();
+        (sp3 && typeof sp3.then === 'function' ? sp3 : Promise.resolve()).then(function () {
+            if (typeof refreshUsersList === 'function') refreshUsersList();
+            if (typeof refreshRequestsList === 'function') refreshRequestsList();
+        });
+    }
 }
 window.openSyncSettings = openSyncSettings;
 window.closeSyncSettings = closeSyncSettings;
