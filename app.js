@@ -1947,15 +1947,17 @@ async function exportToPdf(returnBlob = false, preserveStatus = false, skipFormS
         updateSopData();
     }
     
-    if (!currentSop.meta.title || !currentSop.meta.sopId) {
+    if (!currentSop.meta || !currentSop.meta.title || !currentSop.meta.sopId) {
         showNotification('Please fill in at least SOP Title and SOP ID before exporting.', 'warning');
-        document.getElementById('loadingIndicator').classList.add('hidden');
+        var loaderMeta = document.getElementById('loadingIndicator');
+        if (loaderMeta) loaderMeta.classList.add('hidden');
         resolve(); return;
     }
     
-    if (currentSop.steps.length === 0) {
+    if (!currentSop.steps || !Array.isArray(currentSop.steps) || currentSop.steps.length === 0) {
         showNotification('Please add at least one step before exporting.', 'warning');
-        document.getElementById('loadingIndicator').classList.add('hidden');
+        var loader0 = document.getElementById('loadingIndicator');
+        if (loader0) loader0.classList.add('hidden');
         resolve(); return;
     }
     
@@ -1967,7 +1969,8 @@ async function exportToPdf(returnBlob = false, preserveStatus = false, skipFormS
         saveSopToStorage(); // Save the status change
     }
     
-    document.getElementById('loadingIndicator').classList.remove('hidden');
+    var loadingEl = document.getElementById('loadingIndicator');
+    if (loadingEl) loadingEl.classList.remove('hidden');
     
     // CRITICAL: FORCE LOAD LOGO BEFORE PDF GENERATION - BLOCKING
     console.log('🚨🚨🚨 FORCING LOGO LOAD - THIS WILL BLOCK UNTIL LOGO IS READY 🚨🚨🚨');
@@ -1989,8 +1992,9 @@ async function exportToPdf(returnBlob = false, preserveStatus = false, skipFormS
         
         // Method 1: Try fetch API (works on http:// or https://)
         if (window.location.protocol !== 'file:') {
+            for (var logoPath of ['Recorp_logo.png', './Recorp_logo.png']) {
             try {
-                const response = await fetch('Recorp_logo.png');
+                const response = await fetch(logoPath);
                 if (response.ok) {
                     const blob = await response.blob();
                     const reader = new FileReader();
@@ -2011,7 +2015,9 @@ async function exportToPdf(returnBlob = false, preserveStatus = false, skipFormS
                     if (logoImage) break;
                 }
             } catch (e) {
-                console.log('Fetch method failed:', e.message);
+                console.log('Fetch failed for ' + logoPath + ':', e.message);
+            }
+            if (logoImage) break;
             }
         }
         
@@ -2140,8 +2146,9 @@ async function exportToPdf(returnBlob = false, preserveStatus = false, skipFormS
         console.error('2. You are running from a local server (http://localhost) not file://');
         console.error('3. The logo file is not corrupted');
         
-        document.getElementById('loadingIndicator').classList.add('hidden');
-        showNotification('CRITICAL: Logo could not be loaded. PDF generation aborted. Check console for details.', 'error');
+        var loader = document.getElementById('loadingIndicator');
+        if (loader) loader.classList.add('hidden');
+        showNotification('Logo could not be loaded. PDF generation aborted. Ensure Recorp_logo.png exists.', 'error');
         reject(new Error('Logo could not be loaded - PDF generation aborted'));
         return;
     }
@@ -2613,7 +2620,8 @@ async function exportToPdf(returnBlob = false, preserveStatus = false, skipFormS
         const fileName = `${currentSop.meta.sopId || 'sop'}_${titleSlug}_${Date.now()}.pdf`;
         
         // Always hide loading indicator when PDF generation completes
-        document.getElementById('loadingIndicator').classList.add('hidden');
+        var doneLoader = document.getElementById('loadingIndicator');
+        if (doneLoader) doneLoader.classList.add('hidden');
         
         if (returnBlob) {
             const pdfBlob = doc.output('blob');
@@ -2624,7 +2632,8 @@ async function exportToPdf(returnBlob = false, preserveStatus = false, skipFormS
             resolve();
         }
     } catch (error) {
-        document.getElementById('loadingIndicator').classList.add('hidden');
+        var errLoader = document.getElementById('loadingIndicator');
+        if (errLoader) errLoader.classList.add('hidden');
         showNotification('Error generating PDF: ' + error.message, 'error');
         console.error('PDF generation error:', error);
         reject(error);
@@ -2917,7 +2926,8 @@ async function exportSopPdfFromRegister(key) {
         currentSop = { ...sop };
         delete currentSop.savedAt;
         
-        document.getElementById('loadingIndicator').classList.remove('hidden');
+        var loadingEl = document.getElementById('loadingIndicator');
+    if (loadingEl) loadingEl.classList.remove('hidden');
         
         // Skip form sync – currentSop is already set from Register; form may be empty/wrong tab
         await exportToPdf(false, false, true);
@@ -3722,16 +3732,18 @@ async function approveSopInline(sopKey) {
         if (typeof saveSopToCloud === 'function' && useCloudSops()) {
             try {
                 await saveSopToCloud(sop);
-                console.log('✅ SOP approved and saved to GitHub');
+                console.log('✅ SOP approved and saved to cloud');
             } catch (error) {
-                console.error('❌ Error saving to GitHub:', error);
-                showNotification('Error saving to GitHub: ' + error.message, 'error');
-                throw error;
+                console.warn('Cloud save failed, saving locally:', error);
+                showNotification('Cloud save failed, saving locally: ' + error.message, 'warning');
             }
-        } else {
-            showNotification('GitHub storage not available', 'error');
-            throw new Error('GitHub storage not available');
         }
+        // Always save to localStorage so approval persists even without cloud
+        const key = sop.meta.sopId || sop.key || 'sop-' + Date.now();
+        const localSops = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        localSops[key] = { ...sop, savedAt: new Date().toISOString() };
+        localStorage.setItem('savedSops', JSON.stringify(localSops));
+        console.log('✅ SOP approved and saved to localStorage');
         
         showNotification('SOP approved! Generating PDF...', 'info');
         
@@ -3739,9 +3751,11 @@ async function approveSopInline(sopKey) {
         try {
             // Temporarily set current SOP for PDF export
             const originalSop = { ...currentSop };
-            currentSop = { ...sop };
+            currentSop = JSON.parse(JSON.stringify(sop));
             delete currentSop.savedAt;
-            if (currentSop.reviewedAt) delete currentSop.reviewedAt;
+            delete currentSop.reviewedAt;
+            if (!currentSop.meta) currentSop.meta = {};
+            if (!currentSop.steps) currentSop.steps = [];
             
             // Generate PDF as blob and display inline (skip form sync – currentSop already set)
             const pdfBlob = await exportToPdf(true, false, true);
@@ -4078,28 +4092,31 @@ async function approveSopFromReviewView() {
         sop.meta.reviewDate = reviewDate;
         sop.reviewedAt = new Date().toISOString();
         
-        // SAVE TO GITHUB ONLY - NO LOCALSTORAGE
         if (typeof saveSopToCloud === 'function' && useCloudSops()) {
             try {
                 await saveSopToCloud(sop);
-                console.log('✅ SOP approved and saved to GitHub');
+                console.log('✅ SOP approved and saved to cloud');
             } catch (error) {
-                console.error('❌ Error saving to GitHub:', error);
-                showNotification('Error saving to GitHub: ' + error.message, 'error');
-                throw error;
+                console.warn('Cloud save failed, saving locally:', error);
+                showNotification('Cloud save failed, saving locally: ' + error.message, 'warning');
             }
-        } else {
-            showNotification('GitHub storage not available', 'error');
-            throw new Error('GitHub storage not available');
         }
+        // Always save to localStorage so approval persists even without cloud
+        const saveKey = sop.meta.sopId || currentReviewSopKey || 'sop-' + Date.now();
+        const savedForApproval = JSON.parse(localStorage.getItem('savedSops') || '{}');
+        savedForApproval[saveKey] = { ...sop, savedAt: new Date().toISOString() };
+        localStorage.setItem('savedSops', JSON.stringify(savedForApproval));
+        console.log('✅ SOP approved and saved to localStorage');
         
         showNotification('SOP approved! Generating PDF...', 'info');
         
         // Generate PDF
         const originalSop = { ...currentSop };
-        currentSop = { ...sop };
+        currentSop = JSON.parse(JSON.stringify(sop));
         delete currentSop.savedAt;
-        if (currentSop.reviewedAt) delete currentSop.reviewedAt;
+        delete currentSop.reviewedAt;
+        if (!currentSop.meta) currentSop.meta = {};
+        if (!currentSop.steps) currentSop.steps = [];
         
         const pdfBlob = await exportToPdf(true, false, true);
         const pdfUrl = URL.createObjectURL(pdfBlob);
