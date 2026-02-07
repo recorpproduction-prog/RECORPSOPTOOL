@@ -1,6 +1,6 @@
 # Firebase Setup – Step by Step
 
-Users and pending SOP requests sync across all devices. You configure Firebase once; people just open the app. No keys or setup per device.
+Users, pending SOP requests, SOPs under review, completed SOPs, and images sync across all devices. You configure Firebase once; people just open the app. No keys or setup per device.
 
 ---
 
@@ -59,12 +59,39 @@ service cloud.firestore {
     match /sopToolShared/{docId} {
       allow read, write: if request.auth != null;
     }
+    match /sops/{sopId} {
+      allow read, write: if request.auth != null;
+    }
   }
 }
 ```
 
 4. Click **Publish**
 5. You should see a message that the rules were published successfully
+
+---
+
+## Step 4b: Enable Firebase Storage and Set Rules
+
+1. In the left sidebar, click **Build** → **Storage**
+2. Click **Get started**
+3. **Security rules:** choose **Start in production mode** → **Next**
+4. **Location:** use the same region as Firestore → **Done**
+5. Once Storage is created, click the **Rules** tab
+6. Replace the rules with:
+
+```
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /sop-images/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+```
+
+7. Click **Publish**
 
 ---
 
@@ -129,10 +156,10 @@ window.firebaseConfig = {
 1. Run your app locally (e.g. double-click `start-server.bat` or open `index.html`)
 2. Open the app in your browser
 3. Open the browser console (F12 → Console tab)
-4. You should see: **"Firebase sync ready – users and requests sync across devices"**
-5. Add a user or submit an SOP request
+4. You should see: **"Firebase sync ready – users, requests, SOPs and images sync across devices"**
+5. Add a user, submit an SOP request, or save an SOP with images
 6. Open the same app on another device (or another browser/incognito window)
-7. You should see the same users and requests
+7. You should see the same users, requests, and SOPs (including images)
 
 ---
 

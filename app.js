@@ -392,12 +392,16 @@ async function saveRequestsToCloud(requests) {
     }
 }
 
-// Cloud SOPs: shared API (no OAuth for staff) or Google Drive (Connect per device)
+// Cloud SOPs: Firebase first, then shared API, then Google Drive
 function useCloudSops() {
-    return (typeof window.useSharedAccess === 'function' && window.useSharedAccess()) ||
+    return (typeof window.useFirebaseSync === 'function' && window.useFirebaseSync()) ||
+           (typeof window.useSharedAccess === 'function' && window.useSharedAccess()) ||
            (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive());
 }
 async function loadAllSopsFromCloud() {
+    if (typeof window.useFirebaseSync === 'function' && window.useFirebaseSync() &&
+        typeof window.loadSopsFromFirebase === 'function')
+        return await window.loadSopsFromFirebase();
     if (typeof window.useSharedAccess === 'function' && window.useSharedAccess())
         return await window.loadAllSopsFromSharedAPI();
     if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive())
@@ -405,6 +409,9 @@ async function loadAllSopsFromCloud() {
     return null;
 }
 async function saveSopToCloud(sop) {
+    if (typeof window.useFirebaseSync === 'function' && window.useFirebaseSync() &&
+        typeof window.saveSopToFirebase === 'function')
+        return await window.saveSopToFirebase(sop);
     if (typeof window.useSharedAccess === 'function' && window.useSharedAccess())
         return await window.saveSopToSharedAPI(sop);
     if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive())
@@ -412,6 +419,9 @@ async function saveSopToCloud(sop) {
     return false;
 }
 async function deleteSopFromCloud(sopId) {
+    if (typeof window.useFirebaseSync === 'function' && window.useFirebaseSync() &&
+        typeof window.deleteSopFromFirebase === 'function')
+        return await window.deleteSopFromFirebase(sopId);
     if (typeof window.useSharedAccess === 'function' && window.useSharedAccess())
         return await window.deleteSopFromSharedAPI(sopId);
     if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive())
