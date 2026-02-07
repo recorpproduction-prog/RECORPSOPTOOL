@@ -210,14 +210,17 @@ window.switchTab = function(tabName) {
     }
 };
 
-// Stub for updateAuthorFromUser - will be replaced with full implementation
-window.updateAuthorFromUser = function() {
-    console.warn('⚠️ updateAuthorFromUser stub called - implementation not loaded yet');
-    // Try to call implementation if it exists
-    if (typeof window._updateAuthorFromUserImpl === 'function') {
-        return window._updateAuthorFromUserImpl();
+// updateAuthorFromUser - defined here to avoid stub overwriting the global and causing recursion
+function updateAuthorFromUserImpl() {
+    const authorSelect = document.getElementById('author');
+    if (!authorSelect || !currentSop) return;
+    const selectedAuthor = authorSelect.value;
+    if (selectedAuthor) {
+        currentSop.meta.author = selectedAuthor;
+        console.log('Author updated to:', selectedAuthor);
     }
-};
+}
+window.updateAuthorFromUser = updateAuthorFromUserImpl;
 
 window.submitSopRequest = function(event) {
     console.warn('⚠️ submitSopRequest stub called - implementation not loaded yet');
@@ -1554,6 +1557,11 @@ async function saveSop() {
     URL.revokeObjectURL(url);
     
     showNotification(`SOP saved successfully! Status changed to "Under Review". JSON file: ${fileName}`, 'success');
+    
+    // Switch to Under Review tab so user can see their saved SOP
+    if (typeof switchTab === 'function') {
+        switchTab('review');
+    }
 }
 
 async function saveSopToStorage() {
@@ -3407,14 +3415,7 @@ if (typeof window._submitSopRequestImpl === 'function') {
     console.error('❌ DIAG: submitSopRequest implementation NOT FOUND');
 }
 
-// Assign updateAuthorFromUser implementation
-if (typeof updateAuthorFromUser === 'function') {
-    window._updateAuthorFromUserImpl = updateAuthorFromUser;
-    window.updateAuthorFromUser = updateAuthorFromUser;
-    console.log('✅ DIAG: updateAuthorFromUser implementation loaded');
-} else {
-    console.error('❌ DIAG: updateAuthorFromUser implementation NOT FOUND');
-}
+// updateAuthorFromUser is already assigned at top (updateAuthorFromUserImpl)
 
 console.log('🔍 DIAG: Function replacement complete');
 window.refreshRegister = refreshRegister;
@@ -5098,17 +5099,6 @@ function populateUserDropdown() {
     });
 }
 
-function updateAuthorFromUser() {
-    const authorSelect = document.getElementById('author');
-    if (!authorSelect || !currentSop) return;
-    
-    const selectedAuthor = authorSelect.value;
-    if (selectedAuthor) {
-        currentSop.meta.author = selectedAuthor;
-        console.log('Author updated to:', selectedAuthor);
-    }
-}
-
 function populateReviewerDropdown(dropdownId, currentReviewer = '') {
     const reviewerSelect = document.getElementById(dropdownId);
     if (!reviewerSelect) return;
@@ -5197,7 +5187,7 @@ window.cancelUserForm = cancelUserForm;
 window.saveUser = saveUser;
 window.editUser = editUser;
 window.deleteUser = deleteUser;
-window.updateAuthorFromUser = updateAuthorFromUser;
+window.updateAuthorFromUser = updateAuthorFromUserImpl;
 
 // Email Functions - Store implementation
 window._openEmailSettingsImpl = async function openEmailSettings() {
