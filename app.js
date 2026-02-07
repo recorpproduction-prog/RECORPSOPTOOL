@@ -540,17 +540,28 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 // Event Listeners
 function initializeEventListeners() {
-    document.getElementById('newSopBtn').addEventListener('click', createNewSop);
-    document.getElementById('saveSopBtn').addEventListener('click', saveSop);
+    var newBtn = document.getElementById('newSopBtn');
+    var saveBtn = document.getElementById('saveSopBtn');
+    if (newBtn) newBtn.addEventListener('click', createNewSop);
+    if (saveBtn) saveBtn.addEventListener('click', function() { saveSop().catch(function(e) {
+        console.error('Save SOP error:', e);
+        showNotification('Save failed: ' + (e && e.message ? e.message : 'Unknown error'), 'error');
+    }); });
     const saveSopBtnBottom = document.getElementById('saveSopBtnBottom');
     if (saveSopBtnBottom) {
-        saveSopBtnBottom.addEventListener('click', saveSop);
+        saveSopBtnBottom.addEventListener('click', function() { saveSop().catch(function(e) {
+            console.error('Save SOP error:', e);
+            showNotification('Save failed: ' + (e && e.message ? e.message : 'Unknown error'), 'error');
+        }); });
     }
     
     // Confirmation dialog buttons
-    document.getElementById('confirmationOk').addEventListener('click', () => confirmAction(true));
-    document.getElementById('confirmationCancel').addEventListener('click', () => confirmAction(false));
-    document.getElementById('loadSopBtn').addEventListener('click', showLoadSection);
+    var okBtn = document.getElementById('confirmationOk');
+    var cancelBtn = document.getElementById('confirmationCancel');
+    var loadBtn = document.getElementById('loadSopBtn');
+    if (okBtn) okBtn.addEventListener('click', () => confirmAction(true));
+    if (cancelBtn) cancelBtn.addEventListener('click', () => confirmAction(false));
+    if (loadBtn) loadBtn.addEventListener('click', showLoadSection);
     
     // Auto-save on input changes
     const inputs = document.querySelectorAll('input, textarea, select');
@@ -1476,13 +1487,20 @@ function confirmImageSelection() {
 
 // Save/Load Functions
 async function saveSop() {
-    updateSopData();
+    try {
+        updateSopData();
+    } catch (e) {
+        console.error('updateSopData error:', e);
+        showNotification('Save failed: ' + (e && e.message ? e.message : 'Unknown error'), 'error');
+        throw e;
+    }
     
     if (!currentSop.meta.title || !currentSop.meta.sopId) {
         showNotification('Please fill in at least SOP Title and SOP ID before saving.', 'warning');
         return;
     }
     
+    try {
     // Automatically set Effective Date to today if not set
     if (!currentSop.meta.effectiveDate) {
         const today = new Date().toISOString().split('T')[0];
@@ -1491,7 +1509,7 @@ async function saveSop() {
     
     // Automatically set status to "Under Review" when saving
     currentSop.meta.status = "Under Review";
-    updateStatusDisplay();
+    if (typeof updateStatusDisplay === 'function') updateStatusDisplay();
     
     await saveSopToStorage();
     
@@ -1562,6 +1580,11 @@ async function saveSop() {
     if (typeof switchTab === 'function') {
         switchTab('review');
     }
+    } catch (e) {
+        console.error('Save SOP error:', e);
+        showNotification('Save failed: ' + (e && e.message ? e.message : 'Unknown error'), 'error');
+        throw e;
+    }
 }
 
 async function saveSopToStorage() {
@@ -1593,7 +1616,9 @@ async function saveSopToStorage() {
                     errorMsg = 'Access denied – share Drive folder with service account.';
                 else if (errorMsg.includes('SOP_FOLDER_ID') || errorMsg.includes('not configured'))
                     errorMsg = 'Backend not configured – set SOP_FOLDER_ID and GOOGLE_SERVICE_ACCOUNT_JSON in Cloud Run.';
-                showNotification('Did NOT save to Drive: ' + errorMsg + ' Saved locally only.', 'error');
+                else if (errorMsg.includes('domain') || errorMsg.includes('authorized') || errorMsg.includes('OAuth'))
+                    errorMsg = 'Add this site domain to Firebase Console → Authentication → Authorized domains.';
+                showNotification('Cloud save failed: ' + errorMsg + ' Saved locally.', 'error');
                 // Continue to localStorage fallback - don't throw
             }
         }

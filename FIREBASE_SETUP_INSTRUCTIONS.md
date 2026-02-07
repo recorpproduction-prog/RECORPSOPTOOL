@@ -182,6 +182,14 @@ window.firebaseConfig = {
 - Make sure Anonymous auth is enabled in Firebase Console
 - Make sure Firestore rules are published
 
+**Save SOP not working on deployed site (GitHub Pages, etc.)**
+- **Firebase Authorized Domains:** If using Firebase, add your site domain to authorized domains:
+  1. Firebase Console → Authentication → Settings → Authorized domains
+  2. Click **Add domain**
+  3. Add your full domain (e.g. `username.github.io` or `yourdomain.com`)
+- Without this, Firebase anonymous sign-in fails and cloud save won't work. The app will still save to localStorage, but sync across devices will fail.
+- Check browser console (F12 → Console) for the exact error message.
+
 **Data doesn't sync between devices**
 - Both devices must use the same app (same `sop-config.js` with the same Firebase config)
 - Check the console (F12) on each device for errors
