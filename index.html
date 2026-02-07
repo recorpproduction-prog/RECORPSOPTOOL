@@ -49,7 +49,7 @@
         <div id="connectionErrorBanner" class="workspace-access-banner" style="background:#c0392b;color:#fff;display:none;" role="alert">
             <span id="connectionErrorText">Cannot reach SOP server. Check internet connection.</span>
             <button type="button" class="workspace-access-dismiss" onclick="retryConnectionAndRefresh()" style="background:rgba(255,255,255,0.2);color:#fff;">Retry</button>
-            <button type="button" onclick="openSyncSettings()" style="background:rgba(255,255,255,0.2);color:#fff;margin-left:8px;">Use GitHub instead</button>
+            <button type="button" onclick="openSyncSettings()" style="background:rgba(255,255,255,0.2);color:#fff;margin-left:8px;">Sync info</button>
         </div>
 
         <div id="loadingIndicator" class="loading-indicator hidden">
@@ -683,7 +683,7 @@
         </div>
     </div>
 
-    <!-- Sync Settings Modal: GitHub token for Users &amp; Requests when backend unavailable -->
+    <!-- Sync Settings Modal: Firebase (recommended) or Drive for Users & Requests -->
     <div id="syncSettingsModal" class="modal hidden">
         <div class="modal-content" style="max-width: 520px;">
             <div class="modal-header">
@@ -691,14 +691,9 @@
                 <button class="modal-close" onclick="closeSyncSettings()">×</button>
             </div>
             <div class="modal-body">
-                <p style="margin-bottom: 15px;">When Cloud Run is unavailable, the app uses your GitHub repo for Users and Submitted SOP requests. <strong>Read</strong> works with no setup. <strong>Write</strong> (save users, submit requests) needs a token.</p>
-                <div class="form-group">
-                    <label for="syncGitHubToken">GitHub Personal Access Token (optional, for saving)</label>
-                    <input type="password" id="syncGitHubToken" placeholder="ghp_xxx or github_pat_xxx" style="width: 100%; padding: 8px;">
-                    <small style="color:#7f8c8d; display:block; margin-top:6px;">Create at <a href="https://github.com/settings/tokens" target="_blank">github.com/settings/tokens</a> – needs <code>repo</code> scope. Repo: <span id="syncRepoHint">recorpproduction-prog/RECORPSOPTOOL</span></small>
-                </div>
+                <p style="margin-bottom: 15px;"><strong>Firebase (recommended):</strong> Add your Firebase config to <code>sop-config.js</code> once. Users and requests sync everywhere – no setup per device. See <code>FIREBASE_SETUP_INSTRUCTIONS.md</code>.</p>
+                <p style="margin-bottom: 15px; color:#7f8c8d;"><strong>Fallback:</strong> Without Firebase, connect Google Drive in Settings and use the same folder on each device.</p>
                 <div style="display:flex; gap:10px; margin-top:20px;">
-                    <button class="btn btn-primary" onclick="saveSyncToken()">Save Token</button>
                     <button class="btn btn-secondary" onclick="closeSyncSettings()">Close</button>
                 </div>
             </div>
@@ -757,6 +752,7 @@
     <script>
         if (typeof window.SOP_SHARED_API_URL === 'undefined') window.SOP_SHARED_API_URL = 'https://sop-backend-1065392834988.us-central1.run.app';
         const cacheBuster = '?v=' + Date.now();
+        document.write('<script src="firebase-sync.js' + cacheBuster + '"><\/script>');
         document.write('<script src="google-drive-storage.js' + cacheBuster + '"><\/script>');
         document.write('<script src="shared-sop-api.js' + cacheBuster + '"><\/script>');
         document.write('<script src="app.js' + cacheBuster + '"><\/script>');

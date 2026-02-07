@@ -300,31 +300,37 @@ function saveToGitHub(path, content, message) {
         })
         .then(function (res) { if (!res.ok) throw new Error('GitHub write failed'); });
 }
-// One sync: fetch from Cloud Run AND GitHub in parallel, use whichever has data so phone always gets something.
+// Users & Requests: Firebase first (no per-device setup), then Drive, then localStorage.
 function syncSharedData() {
-    var base = getSharedApiBase();
-    var cloudPromise = base ? Promise.all([
-        fetchBackend('/users', { method: 'GET', headers: { Accept: 'application/json' } }, 8000)
-            .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }),
-        fetchBackend('/requests', { method: 'GET', headers: { Accept: 'application/json' } }, 8000)
-            .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
-    ]) : Promise.resolve([null, null]);
-    var ghPromise = Promise.all([
-        fetchGitHubRaw('_sop-users.json'),
-        fetchGitHubRaw('_sop-requests.json')
-    ]).catch(function () { return [null, null]; });
-    return Promise.all([cloudPromise, ghPromise]).then(function (both) {
-        var cloud = both[0], gh = both[1];
-        var cloudUsers = (cloud[0] && cloud[0].users) ? cloud[0].users : null;
-        var cloudRequests = (cloud[1] && cloud[1].requests) ? cloud[1].requests : null;
-        var ghUsers = (gh[0] && gh[0].users) ? gh[0].users : (Array.isArray(gh[0]) ? gh[0] : null);
-        var ghRequests = (gh[1] && gh[1].requests) ? gh[1].requests : (Array.isArray(gh[1]) ? gh[1] : null);
-        var users = Array.isArray(cloudUsers) && cloudUsers.length > 0 ? cloudUsers : (Array.isArray(ghUsers) ? ghUsers : []);
-        var requests = Array.isArray(cloudRequests) && cloudRequests.length > 0 ? cloudRequests : (Array.isArray(ghRequests) ? ghRequests : []);
-        if (users.length === 0 && Array.isArray(ghUsers)) users = ghUsers;
-        if (requests.length === 0 && Array.isArray(ghRequests)) requests = ghRequests;
-        applySync(users, requests);
-    }).catch(function () { applySync([], []); });
+    function fromLocal() {
+        var u = [];
+        var r = [];
+        try { u = JSON.parse(localStorage.getItem('sopUsers') || '[]'); } catch (_) {}
+        try { r = JSON.parse(localStorage.getItem('sopRequests') || '[]'); } catch (_) {}
+        applySync(u, r);
+    }
+    if (typeof window.useFirebaseSync === 'function' && window.useFirebaseSync()) {
+        Promise.all([
+            typeof window.loadUsersFromFirebase === 'function' ? window.loadUsersFromFirebase() : Promise.resolve(null),
+            typeof window.loadRequestsFromFirebase === 'function' ? window.loadRequestsFromFirebase() : Promise.resolve(null)
+        ]).then(function (out) {
+            var users = Array.isArray(out[0]) ? out[0] : [];
+            var requests = Array.isArray(out[1]) ? out[1] : [];
+            applySync(users, requests);
+        }).catch(function () { fromLocal(); });
+    } else if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive() &&
+        typeof window.loadJsonFromDriveFolder === 'function') {
+        Promise.all([
+            window.loadJsonFromDriveFolder('_sop-users.json'),
+            window.loadJsonFromDriveFolder('_sop-requests.json')
+        ]).then(function (out) {
+            var users = (out[0] && out[0].users) ? out[0].users : (Array.isArray(out[0]) ? out[0] : []);
+            var requests = (out[1] && out[1].requests) ? out[1].requests : (Array.isArray(out[1]) ? out[1] : []);
+            applySync(Array.isArray(users) ? users : [], Array.isArray(requests) ? requests : []);
+        }).catch(function () { fromLocal(); });
+    } else {
+        fromLocal();
+    }
 }
 function applySync(cloudUsers, cloudRequests) {
     cloudUsers = Array.isArray(cloudUsers) ? cloudUsers : [];
@@ -373,21 +379,16 @@ function fetchWithTimeout(url, opts, ms) {
     });
 }
 async function saveRequestsToCloud(requests) {
-    var base = getSharedApiBase();
-    var ok = false;
-    if (base) {
+    if (typeof window.useFirebaseSync === 'function' && window.useFirebaseSync() &&
+        typeof window.saveRequestsToFirebase === 'function') {
         try {
-            var r = await fetchBackend('/requests', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ requests: requests || [] }) }, 15000);
-            if (r.ok) ok = true; else throw new Error('');
-        } catch (e) {
-            if (typeof window.saveRequestsToSharedAPI === 'function') { try { await window.saveRequestsToSharedAPI(requests); ok = true; } catch (_) {} }
-        }
-    }
-    if (!ok && typeof saveToGitHub === 'function') {
+            await window.saveRequestsToFirebase(requests || []);
+        } catch (e) { console.warn('Firebase save requests:', e.message); }
+    } else if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive() &&
+        typeof window.saveJsonToDriveFolder === 'function') {
         try {
-            await saveToGitHub('_sop-requests.json', { requests: requests || [] }, 'Update SOP requests');
-            ok = true;
-        } catch (e) { console.warn('GitHub save failed:', e.message); }
+            await window.saveJsonToDriveFolder('_sop-requests.json', { requests: requests || [] });
+        } catch (e) { console.warn('Drive save requests:', e.message); }
     }
 }
 
@@ -4508,11 +4509,7 @@ function updateGitHubStatus() {
 // Google Drive Settings Functions
 function openSyncSettings() {
     var modal = document.getElementById('syncSettingsModal');
-    var input = document.getElementById('syncGitHubToken');
-    var hint = document.getElementById('syncRepoHint');
     if (modal) modal.classList.remove('hidden');
-    if (input) input.value = getGitHubSyncToken();
-    if (hint && typeof getGitHubSyncRepo === 'function') { var r = getGitHubSyncRepo(); hint.textContent = r.owner + '/' + r.repo; }
 }
 function closeSyncSettings() {
     var modal = document.getElementById('syncSettingsModal');
@@ -4895,21 +4892,16 @@ function getUsers() {
 
 async function saveUsers(users) {
     var arr = Array.isArray(users) ? users : [];
-    var base = getSharedApiBase();
-    var ok = false;
-    if (base) {
+    if (typeof window.useFirebaseSync === 'function' && window.useFirebaseSync() &&
+        typeof window.saveUsersToFirebase === 'function') {
         try {
-            var r = await fetchBackend('/users', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ users: arr }) }, 15000);
-            if (r.ok) ok = true; else throw new Error('');
-        } catch (e) {
-            if (typeof window.saveUsersToSharedAPI === 'function') { try { await window.saveUsersToSharedAPI(arr); ok = true; } catch (_) {} }
-        }
-    }
-    if (!ok && typeof saveToGitHub === 'function') {
+            await window.saveUsersToFirebase(arr);
+        } catch (e) { console.warn('Firebase save users:', e.message); }
+    } else if (typeof window.useGoogleDrive === 'function' && window.useGoogleDrive() &&
+        typeof window.saveJsonToDriveFolder === 'function') {
         try {
-            await saveToGitHub('_sop-users.json', { users: arr }, 'Update SOP users');
-            ok = true;
-        } catch (e) { showNotification('Add GitHub token in Settings to sync users across devices.', 'warning'); }
+            await window.saveJsonToDriveFolder('_sop-users.json', { users: arr });
+        } catch (e) { console.warn('Drive save users:', e.message); }
     }
     try {
         localStorage.setItem('sopUsers', JSON.stringify(arr));
